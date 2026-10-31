@@ -46,7 +46,7 @@ import java.util.Date
 import java.util.Locale
 
 // Calm, paper-like palette: warm off-white background, muted teal accent, soft gray text.
-private val calmColors = lightColorScheme(
+val calmColors = lightColorScheme(
     primary = Color(0xFF3E8E8A),
     onPrimary = Color.White,
     primaryContainer = Color(0xFFDCECEA),
@@ -475,11 +475,64 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApp
         onDismissRequest = onClose,
         title = { Text("Settings") },
         text = {
-            LazyColumn {
+            SettingsContent(
+                key = key, onKey = { key = it },
+                profileName = profileName, onProfileName = { profileName = it },
+                selected = selected, onSelected = { selected = it },
+                dockSelected = dockSelected, onDockSelected = { dockSelected = it },
+                profiles = profiles,
+                onToggleProfile = { p ->
+                    if (activeProfile == p) {
+                        router.activeProfile = null
+                        onActiveProfile(null)
+                    } else {
+                        router.activeProfile = p
+                        onActiveProfile(p)
+                    }
+                },
+                onDeleteProfile = { p ->
+                    router.deleteProfile(p)
+                    profiles = router.profileNames()
+                    if (activeProfile == p) onActiveProfile(null)
+                },
+                gridWobbly = gridWobbly, onGridWobbly = onGridWobbly,
+                activeProfile = activeProfile,
+                apps = apps,
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                router.apiKey = key.trim()
+                if (profileName.isNotBlank()) {
+                    router.saveProfile(profileName.trim(), selected)
+                }
+                onDockApps(apps.map { it.packageName }.filter { it in dockSelected })
+                onClose()
+            }) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } },
+    )
+}
+
+/** Settings panel content, extracted so previews and tests can render it outside the animated dialog. */
+@Composable
+fun SettingsContent(
+    key: String, onKey: (String) -> Unit,
+    profileName: String, onProfileName: (String) -> Unit,
+    selected: Set<String>, onSelected: (Set<String>) -> Unit,
+    dockSelected: Set<String>, onDockSelected: (Set<String>) -> Unit,
+    profiles: Set<String>,
+    onToggleProfile: (String) -> Unit,
+    onDeleteProfile: (String) -> Unit,
+    gridWobbly: Boolean, onGridWobbly: (Boolean) -> Unit,
+    activeProfile: String?,
+    apps: List<AppEntry>,
+) {
+    LazyColumn {
                 item {
                     OutlinedTextField(
                         value = key,
-                        onValueChange = { key = it },
+                        onValueChange = onKey,
                         label = { Text("Anthropic API key") },
                         singleLine = true,
                     )
@@ -508,9 +561,9 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApp
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.clickable {
-                                dockSelected = if (app.packageName in dockSelected) dockSelected - app.packageName
+                                onDockSelected(if (app.packageName in dockSelected) dockSelected - app.packageName
                                 else if (dockSelected.size < 4) dockSelected + app.packageName
-                                else dockSelected
+                                else dockSelected)
                             },
                         ) {
                             Checkbox(
@@ -524,25 +577,13 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApp
                     profiles.forEach { p ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(p, modifier = Modifier.weight(1f))
-                            TextButton(onClick = {
-                                if (activeProfile == p) {
-                                    router.activeProfile = null
-                                    onActiveProfile(null)
-                                } else {
-                                    router.activeProfile = p
-                                    onActiveProfile(p)
-                                }
-                            }) { Text(if (activeProfile == p) "Off" else "Use") }
-                            TextButton(onClick = {
-                                router.deleteProfile(p)
-                                profiles = router.profileNames()
-                                if (activeProfile == p) onActiveProfile(null)
-                            }) { Text("Delete") }
+                            TextButton(onClick = { onToggleProfile(p) }) { Text(if (activeProfile == p) "Off" else "Use") }
+                            TextButton(onClick = { onDeleteProfile(p) }) { Text("Delete") }
                         }
                     }
                     OutlinedTextField(
                         value = profileName,
-                        onValueChange = { profileName = it },
+                        onValueChange = onProfileName,
                         label = { Text("New profile name") },
                         singleLine = true,
                     )
@@ -552,8 +593,8 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApp
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.clickable {
-                            selected = if (app.packageName in selected) selected - app.packageName
-                            else selected + app.packageName
+                            onSelected(if (app.packageName in selected) selected - app.packageName
+                            else selected + app.packageName)
                         },
                     ) {
                         Checkbox(
@@ -564,19 +605,6 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApp
                     }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                router.apiKey = key.trim()
-                if (profileName.isNotBlank()) {
-                    router.saveProfile(profileName.trim(), selected)
-                }
-                onDockApps(apps.map { it.packageName }.filter { it in dockSelected })
-                onClose()
-            }) { Text("Save") }
-        },
-        dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } },
-    )
 }
 
 
