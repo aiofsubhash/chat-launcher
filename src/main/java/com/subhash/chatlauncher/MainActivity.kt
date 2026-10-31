@@ -18,8 +18,11 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -527,69 +530,78 @@ fun SettingsContent(
     gridWobbly: Boolean, onGridWobbly: (Boolean) -> Unit,
     activeProfile: String?,
     apps: List<AppEntry>,
+    expandAll: Boolean = false,
 ) {
-    LazyColumn {
-                item {
-                    OutlinedTextField(
-                        value = key,
-                        onValueChange = onKey,
-                        label = { Text("Anthropic API key") },
-                        singleLine = true,
+    val settingsContext = LocalContext.current
+    val roundedFont = remember { RoundedTypeface.load(settingsContext) }
+    LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.padding(vertical = 4.dp),
+    ) {
+        item {
+            SettingsSection(title = "Appearance", initiallyExpanded = true, expandAll = expandAll, roundedFont = roundedFont) {
+                Text("Grid style", style = MaterialTheme.typography.titleSmall, fontFamily = roundedFont)
+                Row(modifier = Modifier.padding(top = 4.dp)) {
+                    FilterChip(
+                        selected = !gridWobbly,
+                        onClick = { onGridWobbly(false) },
+                        label = { Text("Straight") },
+                        modifier = Modifier.padding(end = 8.dp),
                     )
-                    Text(
-                        "Stored only on this device. Needed for open-ended chat; launching and drafts work without it.",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
+                    FilterChip(
+                        selected = gridWobbly,
+                        onClick = { onGridWobbly(true) },
+                        label = { Text("Wobbly") },
                     )
-                    Text("Grid style", style = MaterialTheme.typography.titleSmall)
-                    Row(modifier = Modifier.padding(bottom = 12.dp)) {
-                        FilterChip(
-                            selected = !gridWobbly,
-                            onClick = { onGridWobbly(false) },
-                            label = { Text("Straight") },
-                            modifier = Modifier.padding(end = 8.dp),
-                        )
-                        FilterChip(
-                            selected = gridWobbly,
-                            onClick = { onGridWobbly(true) },
-                            label = { Text("Wobbly") },
-                        )
-                    }
-                    Text("Home apps", style = MaterialTheme.typography.titleSmall)
-                    Text("Up to 4 shown in the center of the home screen.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 4.dp))
-                    apps.forEach { app ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.clickable {
-                                onDockSelected(if (app.packageName in dockSelected) dockSelected - app.packageName
-                                else if (dockSelected.size < 4) dockSelected + app.packageName
-                                else dockSelected)
-                            },
-                        ) {
-                            Checkbox(
-                                checked = app.packageName in dockSelected,
-                                onCheckedChange = null,
-                            )
-                            Text(app.label)
-                        }
-                    }
-                    Text("Focus profiles", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
-                    profiles.forEach { p ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(p, modifier = Modifier.weight(1f))
-                            TextButton(onClick = { onToggleProfile(p) }) { Text(if (activeProfile == p) "Off" else "Use") }
-                            TextButton(onClick = { onDeleteProfile(p) }) { Text("Delete") }
-                        }
-                    }
-                    OutlinedTextField(
-                        value = profileName,
-                        onValueChange = onProfileName,
-                        label = { Text("New profile name") },
-                        singleLine = true,
-                    )
-                    Text("Apps hidden in this profile:", style = MaterialTheme.typography.bodySmall)
                 }
-                items(apps) { app ->
+            }
+        }
+        item {
+            SettingsSection(title = "Home apps", initiallyExpanded = true, expandAll = expandAll, roundedFont = roundedFont) {
+                Text(
+                    "Up to 4 shown in the center of the home screen.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+                apps.forEach { app ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable {
+                            onDockSelected(if (app.packageName in dockSelected) dockSelected - app.packageName
+                            else if (dockSelected.size < 4) dockSelected + app.packageName
+                            else dockSelected)
+                        },
+                    ) {
+                        Checkbox(checked = app.packageName in dockSelected, onCheckedChange = null)
+                        Text(app.label, fontFamily = roundedFont)
+                    }
+                }
+            }
+        }
+        item {
+            SettingsSection(title = "Focus profiles", initiallyExpanded = false, expandAll = expandAll, roundedFont = roundedFont) {
+                profiles.forEach { p ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(p, modifier = Modifier.weight(1f), fontFamily = roundedFont)
+                        TextButton(onClick = { onToggleProfile(p) }) { Text(if (activeProfile == p) "Off" else "Use") }
+                        TextButton(onClick = { onDeleteProfile(p) }) { Text("Delete") }
+                    }
+                }
+                OutlinedTextField(
+                    value = profileName,
+                    onValueChange = onProfileName,
+                    label = { Text("New profile name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "Apps hidden in this profile:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                apps.forEach { app ->
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.clickable {
@@ -597,16 +609,77 @@ fun SettingsContent(
                             else selected + app.packageName)
                         },
                     ) {
-                        Checkbox(
-                            checked = app.packageName in selected,
-                            onCheckedChange = null,
-                        )
-                        Text(app.label)
+                        Checkbox(checked = app.packageName in selected, onCheckedChange = null)
+                        Text(app.label, fontFamily = roundedFont)
                     }
                 }
             }
+        }
+        item {
+            SettingsSection(title = "Assistant", initiallyExpanded = false, expandAll = expandAll, roundedFont = roundedFont) {
+                OutlinedTextField(
+                    value = key,
+                    onValueChange = onKey,
+                    label = { Text("Anthropic API key") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "Stored only on this device. Needed for open-ended chat; launching and drafts work without it.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+        }
+    }
 }
 
+/** One collapsible settings section with a calm card look. */
+@Composable
+fun SettingsSection(
+    title: String,
+    initiallyExpanded: Boolean,
+    expandAll: Boolean,
+    roundedFont: androidx.compose.ui.text.font.FontFamily?,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    var expanded by rememberSaveable { mutableStateOf(initiallyExpanded || expandAll) }
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+            ) {
+                Text(
+                    title,
+                    fontFamily = roundedFont,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (expanded) {
+                Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
+                    content()
+                }
+            }
+        }
+    }
+}
 
 /** Home dock slot: a small sticky note with the app name, per owner request. */
 @Composable
