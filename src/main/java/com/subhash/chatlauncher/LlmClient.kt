@@ -25,7 +25,7 @@ object LlmClient {
             val body = JSONObject()
                 .put("model", MODEL)
                 .put("max_tokens", 1024)
-                .put("system", "You are the voice of a chat-first Android launcher. Be brief and plain. You cannot perform device actions yourself; the launcher app handles app launches and message drafts.")
+                .put("system", "You are the voice of a chat-first Android launcher. Be brief and plain. You cannot perform device actions yourself; the launcher app handles app launches and message drafts. When visual formatting genuinely helps, you may answer in simple HTML (no scripts).")
                 .put("messages", messages)
                 .toString()
 
