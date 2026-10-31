@@ -2,6 +2,7 @@ plugins {
     id("com.android.application") version "8.5.2"
     id("org.jetbrains.kotlin.android") version "2.0.20"
     id("org.jetbrains.kotlin.plugin.compose") version "2.0.20"
+    id("io.github.takahirom.roborazzi") version "1.20.0"
 }
 
 android {
@@ -17,6 +18,9 @@ android {
     }
 
     buildFeatures { compose = true }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -33,4 +37,10 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.5")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.13")
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.20.0")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.20.0")
 }
