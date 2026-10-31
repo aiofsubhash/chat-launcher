@@ -32,12 +32,15 @@ Platform decision (Oct 31): Android only. Android exposes a documented home-scre
 - Open-ended chat through the Anthropic Messages API when the user adds their own API key in Settings (stored on-device only).
 - No permissions beyond INTERNET; app listing via manifest `<queries>`.
 
-## Later (explicitly not v1)
+## Later
 
-- Execution harness: filesystem access, computer-use agent (use case 4).
-- HTML-rich responses with sanitization (use case 5).
-- Multiple named focus profiles and contact-aware message routing (needs READ_CONTACTS consent flow).
-- Inspiration from Sumit's repo when it arrives.
+- Execution harness: filesystem access, computer-use agent (use case 4 - explicitly deferred by owner).
+- Contact-aware message routing (needs READ_CONTACTS consent flow).
+- Inspiration from Sumit's repo when access is granted (currently private).
+
+## Status (Oct 31)
+
+v0.1.0 built and compiles clean (`gradle assembleDebug`). Focus profiles (6) and HTML responses with JavaScript disabled (5) are in. Review + compound passes done: docs/reviews/, docs/solutions/. Device smoke test pending (build sandbox has no KVM).
 
 ## Architecture
 
