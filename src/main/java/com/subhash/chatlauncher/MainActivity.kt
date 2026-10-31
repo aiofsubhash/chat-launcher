@@ -7,9 +7,6 @@ import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -245,8 +242,6 @@ fun ChatHome(
                 activeProfile = router.activeProfile
             }) { Text("Fresh chat", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontFamily = roundedFont) }
             Spacer(Modifier.weight(1f))
-            Text(now, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 17.sp, fontFamily = roundedFont)
-            Spacer(Modifier.weight(1f))
             Surface(
                 shape = RoundedCornerShape(50),
                 color = MaterialTheme.colorScheme.primaryContainer,
@@ -262,6 +257,16 @@ fun ChatHome(
                 }
             }
         }
+
+        // Date + time below the top bar, larger per owner request
+        Text(
+            now,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 34.sp,
+            fontFamily = roundedFont,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+        )
 
         // Home dock when the chat is empty: centered, slightly below middle for thumb reach
         if (messages.isEmpty()) {
@@ -368,7 +373,7 @@ fun ChatHome(
                     Spacer(Modifier.weight(1f))
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFF2F6FED),
+                        color = Color(0xFFB08968),
                         modifier = Modifier.clickable { send() },
                     ) {
                         Text(
@@ -571,39 +576,17 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApp
 }
 
 
-/** App slot in the home dock: real launcher icon over the app label. */
+/** App slot in the home dock: text only, per owner request. */
 @Composable
 fun DockIcon(app: AppEntry, fontFamily: androidx.compose.ui.text.font.FontFamily?, onLaunch: () -> Unit) {
-    val context = LocalContext.current
-    val icon = remember(app.packageName) {
-        runCatching {
-            context.packageManager.getApplicationIcon(app.packageName).toBitmap().asImageBitmap()
-        }.getOrNull()
-    }
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.clickable { onLaunch() },
-    ) {
-        if (icon != null) {
-            Image(bitmap = icon, contentDescription = app.label, modifier = Modifier.size(52.dp))
-        } else {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.secondaryContainer,
-                modifier = Modifier.size(52.dp),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(app.label.take(1), color = MaterialTheme.colorScheme.onSecondaryContainer, fontSize = 20.sp, fontFamily = fontFamily)
-                }
-            }
-        }
-        Text(
-            app.label,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 12.sp,
-            fontFamily = fontFamily,
-            maxLines = 1,
-            modifier = Modifier.padding(top = 4.dp),
-        )
-    }
+    Text(
+        app.label,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontSize = 17.sp,
+        fontFamily = fontFamily,
+        maxLines = 1,
+        modifier = Modifier
+            .clickable { onLaunch() }
+            .padding(horizontal = 6.dp, vertical = 12.dp),
+    )
 }
