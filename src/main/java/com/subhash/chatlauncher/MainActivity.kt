@@ -64,7 +64,7 @@ class MainActivity : ComponentActivity() {
             }
             .filter { query.isBlank() || it.label.contains(query, true) || it.packageName.contains(query, true) }
             .sortedBy {
-                val i = it.label.indexOf(query, true)
+                val i = it.label.indexOf(query, ignoreCase = true)
                 if (i < 0) Int.MAX_VALUE else i
             }
             .take(6)
