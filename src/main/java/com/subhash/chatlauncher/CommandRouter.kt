@@ -26,6 +26,13 @@ class CommandRouter(
         get() = prefs.getBoolean("grid_wobbly", true)
         set(v) = prefs.edit().putBoolean("grid_wobbly", v).apply()
 
+    // Home dock apps (up to 4), in display order. Defaults per owner request.
+    var dockApps: List<String>
+        get() = prefs.getString("dock_apps", null)
+            ?.split(",")?.filter { it.isNotBlank() }?.take(4)
+            ?: DEFAULT_DOCK_APPS
+        set(v) = prefs.edit().putString("dock_apps", v.take(4).joinToString(",")).apply()
+
     fun profileNames(): Set<String> = prefs.getStringSet("profile_names", emptySet()) ?: emptySet()
 
     fun profileHidden(name: String): Set<String> =
@@ -48,6 +55,15 @@ class CommandRouter(
 
     /** Packages hidden by the currently active focus profile (empty when off). */
     fun hiddenNow(): Set<String> = activeProfile?.let { profileHidden(it) } ?: emptySet()
+
+    companion object {
+        val DEFAULT_DOCK_APPS = listOf(
+            "com.google.android.apps.maps",
+            "com.android.chrome",
+            "com.spotify.music",
+            "com.phonepe.app",
+        )
+    }
 
     sealed interface Result {
         data class Reply(val text: String) : Result
