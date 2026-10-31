@@ -42,8 +42,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.Font
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.sp
@@ -76,8 +74,6 @@ private val calmColors = lightColorScheme(
 )
 
 /** Faint irregular paper grid behind the chat, matching the calm reference style. */
-val RoundedFont = FontFamily(Font(R.font.nunito_regular))
-
 val MicIcon: ImageVector = materialIcon(name = "Mic") {
     materialPath {
         moveTo(12f, 14f)
@@ -241,6 +237,7 @@ fun ChatHome(
         if (SpeechRecognizer.isRecognitionAvailable(context)) SpeechRecognizer.createSpeechRecognizer(context) else null
     }
     DisposableEffect(Unit) { onDispose { recognizer?.destroy() } }
+    val roundedFont = remember { RoundedTypeface.load(context) }
     var input by remember { mutableStateOf("") }
     var messages by remember { mutableStateOf(listOf<ChatMessage>()) }
     var activeProfile by remember { mutableStateOf(router.activeProfile) }
@@ -296,7 +293,7 @@ fun ChatHome(
                         "Hey,",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 26.sp,
-                        fontFamily = RoundedFont,
+                        fontFamily = roundedFont,
                         fontWeight = FontWeight.Medium,
                         letterSpacing = 0.5.sp,
                     )
@@ -304,7 +301,7 @@ fun ChatHome(
                         "Type an app name, 'focus', 'send ... to name: message', or tap Speak.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                         fontSize = 13.sp,
-                        fontFamily = RoundedFont,
+                        fontFamily = roundedFont,
                         fontWeight = FontWeight.Normal,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(top = 6.dp),
@@ -465,7 +462,7 @@ fun ChatHome(
                                 if (listening) "Listening..." else "Speak",
                                 color = Color.White,
                                 fontSize = 13.sp,
-                                fontFamily = RoundedFont,
+                                fontFamily = roundedFont,
                                 modifier = Modifier.padding(start = 6.dp),
                             )
                         }
