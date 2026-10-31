@@ -6,18 +6,27 @@ An Android launcher where the home screen is a chat.
 
 Chat is the interface. Instead of a grid of icons, you talk: the launcher interprets what you want and brings the right app, action, or answer to you.
 
-## Open product question
+## Use cases (Subhash, Oct 31, 2026)
 
-Two directions are being decided between:
-
-1. **AI-command chat** - type or say what you want ("open Spotify", "message Amma I'm running late", "what's on my calendar") and the launcher does it. Precedents: Saint John, ARIA (open-source agentic launchers on Android).
-2. **People-chat hub** - your conversations are the home screen; a typed line routes to the right person on the right app. Precedent: MinkLauncher's message hub.
+1. Send this message to a person: "intended message"
+2. Typing "whatsapp" offers to open WhatsApp (same for any app)
+3. Open-ended AI chat, later with rich HTML responses
+4. Phone-execution harness (filesystem + API key + computer use) - later
+5. Focus modes that hide chosen apps, with or without chat
 
 ## Platform
 
-- **Android only** (decision Oct 31, 2026: iOS out of scope - Apple offers no home-screen replacement API).
-- Android supports a real home-screen replacement via `ROLE_HOME` / `CATEGORY_HOME` intent filter (user grants the home role to the app).
+- **Android only** (decision Oct 31, 2026: iOS has no home-screen replacement API).
+- Real home-screen replacement via `ROLE_HOME` / `CATEGORY_HOME`.
+
+## Build
+
+Single-module Kotlin/Compose app. Needs JDK 17 + Android SDK (platform 34):
+
+    gradle assembleDebug
+
+Then set Chat Launcher as the default home app.
 
 ## Process
 
-Built with the Compound Engineering loop (https://github.com/EveryInc/compound-engineering-plugin): brainstorm requirements, plan, work, review, compound learnings. See `docs/STRATEGY.md`.
+Built with the Compound Engineering loop (https://github.com/EveryInc/compound-engineering-plugin), executed as synchronous prompt files: brainstorm requirements, plan, work, review, compound learnings. See `docs/STRATEGY.md` and `docs/plans/`.
