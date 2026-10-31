@@ -1,6 +1,11 @@
 package com.subhash.chatlauncher
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.os.Bundle
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -14,8 +19,13 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.core.content.ContextCompat
+import androidx.compose.material.icons.materialIcon
+import androidx.compose.material.icons.materialPath
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.foundation.background
@@ -30,6 +40,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.sp
@@ -62,24 +74,59 @@ private val calmColors = lightColorScheme(
 )
 
 /** Faint irregular paper grid behind the chat, matching the calm reference style. */
+val MicIcon: ImageVector = materialIcon(name = "Mic") {
+    materialPath {
+        moveTo(12f, 14f)
+        curveToRelative(1.66f, 0f, 3f, -1.34f, 3f, -3f)
+        verticalLineTo(5f)
+        curveToRelative(0f, -1.66f, -1.34f, -3f, -3f, -3f)
+        reflectiveCurveTo(9f, 3.34f, 9f, 5f)
+        verticalLineToRelative(6f)
+        curveToRelative(0f, 1.66f, 1.34f, 3f, 3f, 3f)
+        close()
+        moveTo(17.91f, 11f)
+        curveToRelative(-0.49f, 0f, -0.9f, 0.36f, -0.98f, 0.85f)
+        curveTo(16.52f, 14.2f, 14.47f, 16f, 12f, 16f)
+        reflectiveCurveToRelative(-4.52f, -1.8f, -5.09f, -4.15f)
+        curveToRelative(-0.08f, -0.49f, -0.49f, -0.85f, -0.98f, -0.85f)
+        curveToRelative(-0.61f, 0f, -1.09f, 0.54f, -1f, 1.14f)
+        curveToRelative(0.49f, 3f, 2.89f, 5.35f, 5.91f, 5.78f)
+        verticalLineTo(20f)
+        curveToRelative(0f, 0.55f, 0.45f, 1f, 1f, 1f)
+        reflectiveCurveToRelative(1f, -0.45f, 1f, -1f)
+        verticalLineToRelative(-2.08f)
+        curveToRelative(3.02f, -0.43f, 5.42f, -2.78f, 5.91f, -5.78f)
+        curveToRelative(0.1f, -0.6f, -0.39f, -1.14f, -1f, -1.14f)
+        close()
+    }
+}
+
 @Composable
 fun PaperGrid(modifier: Modifier = Modifier, wobbly: Boolean = false) {
     val lineColor = Color(0xFF6B6B64).copy(alpha = 0.10f)
     Canvas(modifier = modifier) {
         val step = 46.dp.toPx()
-        val amp = if (wobbly) 5.dp.toPx() else 0f
+        val amp = if (wobbly) 2.5.dp.toPx() else 0f
+        fun jitter(line: Int, seg: Int): Float {
+            var h = line * 374761393 + seg * 668265263
+            h = (h xor (h shr 13)) * 1274126177
+            h = h xor (h shr 16)
+            return (h % 1000) / 1000f * 2f - 1f
+        }
+        var li = 0
         var x = step / 2
         while (x < size.width) {
             if (wobbly) {
                 val path = Path()
                 path.moveTo(x, 0f)
                 var y = 0f
-                while (y <= size.height) { path.lineTo(x + sin(y / 55f) * amp, y); y += 14f }
+                var seg = 0
+                while (y <= size.height) { path.lineTo(x + jitter(li, seg) * amp, y); y += 20f; seg++ }
                 drawPath(path, lineColor, style = Stroke(width = 1f))
             } else {
                 drawLine(lineColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
             }
-            x += step
+            x += step; li++
         }
         var y = step / 2
         while (y < size.height) {
@@ -87,12 +134,13 @@ fun PaperGrid(modifier: Modifier = Modifier, wobbly: Boolean = false) {
                 val path = Path()
                 path.moveTo(0f, y)
                 var xx = 0f
-                while (xx <= size.width) { path.lineTo(xx, y + sin(xx / 55f) * amp); xx += 14f }
+                var seg = 0
+                while (xx <= size.width) { path.lineTo(xx, y + jitter(li, seg) * amp); xx += 20f; seg++ }
                 drawPath(path, lineColor, style = Stroke(width = 1f))
             } else {
                 drawLine(lineColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
             }
-            y += step
+            y += step; li++
         }
     }
 }
@@ -183,6 +231,13 @@ fun ChatHome(
     launchApp: (AppEntry) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var listening by remember { mutableStateOf(false) }
+    val recognizer = remember {
+        if (SpeechRecognizer.isRecognitionAvailable(context)) SpeechRecognizer.createSpeechRecognizer(context) else null
+    }
+    DisposableEffect(Unit) { onDispose { recognizer?.destroy() } }
+    val roundedFont = remember { RoundedTypeface.load(context) }
     var input by remember { mutableStateOf("") }
     var messages by remember { mutableStateOf(listOf<ChatMessage>()) }
     var activeProfile by remember { mutableStateOf(router.activeProfile) }
@@ -230,28 +285,6 @@ fun ChatHome(
             }) { Text("New chat", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp) }
         }
 
-        // Focus state + settings
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            FilterChip(
-                selected = activeProfile != null,
-                onClick = {
-                    if (activeProfile != null) {
-                        router.activeProfile = null
-                        activeProfile = null
-                        messages = messages + ChatMessage(false, "Focus mode off.")
-                    } else {
-                        val names = router.profileNames()
-                        messages = messages + ChatMessage(
-                            false,
-                            if (names.isEmpty()) "No focus profiles yet - create one in Settings."
-                            else "Say 'focus <name>'. Profiles: ${names.joinToString(", ")}"
-                        )
-                    }
-                },
-                label = { Text(activeProfile?.let { "Focus: $it" } ?: "Focus off") },
-            )
-        }
-
         // Centered helper when the chat is empty
         if (messages.isEmpty()) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -260,13 +293,16 @@ fun ChatHome(
                         "Hey,",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 26.sp,
-                        fontWeight = FontWeight.Light,
+                        fontFamily = roundedFont,
+                        fontWeight = FontWeight.Medium,
+                        letterSpacing = 0.5.sp,
                     )
                     Text(
-                        "Type an app name, 'focus', 'send ... to name: message', or just talk.",
+                        "Type an app name, 'focus', 'send ... to name: message', or tap Speak.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                         fontSize = 13.sp,
-                        fontWeight = FontWeight.Light,
+                        fontFamily = roundedFont,
+                        fontWeight = FontWeight.Normal,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(top = 6.dp),
                     )
@@ -342,8 +378,41 @@ fun ChatHome(
                 if (note.isNotEmpty()) messages = messages + ChatMessage(false, note)
             }
         }
+        val startListening = {
+            val r = recognizer
+            if (r == null) {
+                messages = messages + ChatMessage(false, "Speech recognition is not available on this device.")
+            } else {
+                r.setRecognitionListener(object : RecognitionListener {
+                    override fun onResults(results: Bundle) {
+                        val text = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                        if (!text.isNullOrBlank()) input = if (input.isBlank()) text else "$input $text"
+                        listening = false
+                    }
+                    override fun onPartialResults(partialResults: Bundle) {
+                        val text = partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                        if (!text.isNullOrBlank()) input = text
+                    }
+                    override fun onError(error: Int) { listening = false }
+                    override fun onReadyForSpeech(params: Bundle?) {}
+                    override fun onBeginningOfSpeech() {}
+                    override fun onRmsChanged(rmsdB: Float) {}
+                    override fun onBufferReceived(buffer: ByteArray?) {}
+                    override fun onEndOfSpeech() { listening = false }
+                    override fun onEvent(eventType: Int, params: Bundle?) {}
+                })
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                    .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                r.startListening(intent)
+                listening = true
+            }
+        }
+        val audioPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) startListening() else messages = messages + ChatMessage(false, "Microphone permission is needed for voice input.")
+        }
         Surface(
-            shape = RoundedCornerShape(26.dp),
+            shape = RoundedCornerShape(16.dp),
             color = Color.White,
             border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.22f)),
             modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
@@ -368,22 +437,32 @@ fun ChatHome(
                     Surface(
                         shape = RoundedCornerShape(50),
                         color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.clickable { send() },
+                        modifier = Modifier.clickable {
+                            if (listening) {
+                                recognizer?.stopListening()
+                                listening = false
+                            } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                                startListening()
+                            } else {
+                                audioPermission.launch(Manifest.permission.RECORD_AUDIO)
+                            }
+                        },
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
                         ) {
                             Icon(
-                                Icons.AutoMirrored.Filled.Send,
-                                contentDescription = "Send",
+                                MicIcon,
+                                contentDescription = "Speak",
                                 tint = Color.White,
                                 modifier = Modifier.size(14.dp),
                             )
                             Text(
-                                "Send",
+                                if (listening) "Listening..." else "Speak",
                                 color = Color.White,
                                 fontSize = 13.sp,
+                                fontFamily = roundedFont,
                                 modifier = Modifier.padding(start = 6.dp),
                             )
                         }
@@ -431,6 +510,8 @@ fun ChatHome(
             allApps = allApps,
             gridWobbly = gridWobbly,
             onGridWobbly = { gridWobbly = it; router.gridWobbly = it },
+            activeProfile = activeProfile,
+            onActiveProfile = { activeProfile = it },
             onClose = { showSettings = false },
         )
     }
@@ -459,7 +540,7 @@ fun HtmlBubble(html: String) {
 }
 
 @Composable
-fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, gridWobbly: Boolean, onGridWobbly: (Boolean) -> Unit, onClose: () -> Unit) {
+fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, gridWobbly: Boolean, onGridWobbly: (Boolean) -> Unit, activeProfile: String?, onActiveProfile: (String?) -> Unit, onClose: () -> Unit) {
     var key by remember { mutableStateOf(router.apiKey) }
     var profileName by remember { mutableStateOf("") }
     var selected by remember { mutableStateOf(setOf<String>()) }
@@ -502,8 +583,18 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, gridWob
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(p, modifier = Modifier.weight(1f))
                             TextButton(onClick = {
+                                if (activeProfile == p) {
+                                    router.activeProfile = null
+                                    onActiveProfile(null)
+                                } else {
+                                    router.activeProfile = p
+                                    onActiveProfile(p)
+                                }
+                            }) { Text(if (activeProfile == p) "Off" else "Use") }
+                            TextButton(onClick = {
                                 router.deleteProfile(p)
                                 profiles = router.profileNames()
+                                if (activeProfile == p) onActiveProfile(null)
                             }) { Text("Delete") }
                         }
                     }
