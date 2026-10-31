@@ -74,30 +74,13 @@ private val calmColors = lightColorScheme(
 )
 
 /** Faint irregular paper grid behind the chat, matching the calm reference style. */
-val MicIcon: ImageVector = materialIcon(name = "Mic") {
+val WaveformIcon: ImageVector = materialIcon(name = "Waveform") {
     materialPath {
-        moveTo(12f, 14f)
-        curveToRelative(1.66f, 0f, 3f, -1.34f, 3f, -3f)
-        verticalLineTo(5f)
-        curveToRelative(0f, -1.66f, -1.34f, -3f, -3f, -3f)
-        reflectiveCurveTo(9f, 3.34f, 9f, 5f)
-        verticalLineToRelative(6f)
-        curveToRelative(0f, 1.66f, 1.34f, 3f, 3f, 3f)
-        close()
-        moveTo(17.91f, 11f)
-        curveToRelative(-0.49f, 0f, -0.9f, 0.36f, -0.98f, 0.85f)
-        curveTo(16.52f, 14.2f, 14.47f, 16f, 12f, 16f)
-        reflectiveCurveToRelative(-4.52f, -1.8f, -5.09f, -4.15f)
-        curveToRelative(-0.08f, -0.49f, -0.49f, -0.85f, -0.98f, -0.85f)
-        curveToRelative(-0.61f, 0f, -1.09f, 0.54f, -1f, 1.14f)
-        curveToRelative(0.49f, 3f, 2.89f, 5.35f, 5.91f, 5.78f)
-        verticalLineTo(20f)
-        curveToRelative(0f, 0.55f, 0.45f, 1f, 1f, 1f)
-        reflectiveCurveToRelative(1f, -0.45f, 1f, -1f)
-        verticalLineToRelative(-2.08f)
-        curveToRelative(3.02f, -0.43f, 5.42f, -2.78f, 5.91f, -5.78f)
-        curveToRelative(0.1f, -0.6f, -0.39f, -1.14f, -1f, -1.14f)
-        close()
+        moveTo(4f, 10f); horizontalLineToRelative(2f); verticalLineToRelative(4f); horizontalLineToRelative(-2f); close()
+        moveTo(8f, 7f); horizontalLineToRelative(2f); verticalLineToRelative(10f); horizontalLineToRelative(-2f); close()
+        moveTo(12f, 4f); horizontalLineToRelative(2f); verticalLineToRelative(16f); horizontalLineToRelative(-2f); close()
+        moveTo(16f, 8f); horizontalLineToRelative(2f); verticalLineToRelative(8f); horizontalLineToRelative(-2f); close()
+        moveTo(20f, 10.5f); horizontalLineToRelative(2f); verticalLineToRelative(3f); horizontalLineToRelative(-2f); close()
     }
 }
 
@@ -453,7 +436,7 @@ fun ChatHome(
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
                         ) {
                             Icon(
-                                MicIcon,
+                                WaveformIcon,
                                 contentDescription = "Speak",
                                 tint = Color.White,
                                 modifier = Modifier.size(14.dp),
