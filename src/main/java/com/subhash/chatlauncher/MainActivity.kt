@@ -211,10 +211,13 @@ fun HtmlBubble(html: String) {
     AndroidView(
         factory = { ctx ->
             WebView(ctx).apply {
+                // Untrusted model output: no script, no file/content access, navigation blocked.
+                // Remote images may still load (accepted for v1; revisit if content policy tightens).
                 settings.javaScriptEnabled = false
+                settings.allowFileAccess = false
+                settings.allowContentAccess = false
                 webViewClient = object : WebViewClient() {
-                    @Deprecated("deprecated in Java")
-                    override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean = true
+                    override fun shouldOverrideUrlLoading(view: WebView, request: android.webkit.WebResourceRequest): Boolean = true
                 }
                 loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
             }
