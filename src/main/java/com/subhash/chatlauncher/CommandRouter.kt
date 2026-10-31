@@ -23,7 +23,7 @@ class CommandRouter(
         set(v) = prefs.edit().putString("active_profile", v ?: "").apply()
 
     var gridWobbly: Boolean
-        get() = prefs.getBoolean("grid_wobbly", false)
+        get() = prefs.getBoolean("grid_wobbly", true)
         set(v) = prefs.edit().putBoolean("grid_wobbly", v).apply()
 
     fun profileNames(): Set<String> = prefs.getStringSet("profile_names", emptySet()) ?: emptySet()
