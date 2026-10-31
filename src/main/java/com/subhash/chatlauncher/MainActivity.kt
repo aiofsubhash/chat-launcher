@@ -1,11 +1,6 @@
 package com.subhash.chatlauncher
 
-import android.Manifest
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import android.os.Bundle
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -19,19 +14,15 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.core.content.ContextCompat
-import androidx.compose.material.icons.materialIcon
-import androidx.compose.material.icons.materialPath
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -40,7 +31,6 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.ImeAction
@@ -74,33 +64,6 @@ private val calmColors = lightColorScheme(
 )
 
 /** Faint irregular paper grid behind the chat, matching the calm reference style. */
-val MicIcon: ImageVector = materialIcon(name = "Mic") {
-    materialPath {
-        moveTo(12f, 14f)
-        curveToRelative(1.66f, 0f, 3f, -1.34f, 3f, -3f)
-        verticalLineTo(5f)
-        curveToRelative(0f, -1.66f, -1.34f, -3f, -3f, -3f)
-        reflectiveCurveTo(9f, 3.34f, 9f, 5f)
-        verticalLineToRelative(6f)
-        curveToRelative(0f, 1.66f, 1.34f, 3f, 3f, 3f)
-        close()
-        moveTo(17.91f, 11f)
-        curveToRelative(-0.49f, 0f, -0.9f, 0.36f, -0.98f, 0.85f)
-        curveTo(16.52f, 14.2f, 14.47f, 16f, 12f, 16f)
-        reflectiveCurveToRelative(-4.52f, -1.8f, -5.09f, -4.15f)
-        curveToRelative(-0.08f, -0.49f, -0.49f, -0.85f, -0.98f, -0.85f)
-        curveToRelative(-0.61f, 0f, -1.09f, 0.54f, -1f, 1.14f)
-        curveToRelative(0.49f, 3f, 2.89f, 5.35f, 5.91f, 5.78f)
-        verticalLineTo(20f)
-        curveToRelative(0f, 0.55f, 0.45f, 1f, 1f, 1f)
-        reflectiveCurveToRelative(1f, -0.45f, 1f, -1f)
-        verticalLineToRelative(-2.08f)
-        curveToRelative(3.02f, -0.43f, 5.42f, -2.78f, 5.91f, -5.78f)
-        curveToRelative(0.1f, -0.6f, -0.39f, -1.14f, -1f, -1.14f)
-        close()
-    }
-}
-
 @Composable
 fun PaperGrid(modifier: Modifier = Modifier, wobbly: Boolean = false) {
     val lineColor = Color(0xFF6B6B64).copy(alpha = 0.10f)
@@ -232,11 +195,6 @@ fun ChatHome(
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    var listening by remember { mutableStateOf(false) }
-    val recognizer = remember {
-        if (SpeechRecognizer.isRecognitionAvailable(context)) SpeechRecognizer.createSpeechRecognizer(context) else null
-    }
-    DisposableEffect(Unit) { onDispose { recognizer?.destroy() } }
     val roundedFont = remember { RoundedTypeface.load(context) }
     var input by remember { mutableStateOf("") }
     var messages by remember { mutableStateOf(listOf<ChatMessage>()) }
@@ -247,10 +205,10 @@ fun ChatHome(
     val suggestions = remember(input, activeProfile) { if (input.isBlank()) emptyList() else resolveApps(input) } // resolveApps reads a cached list inside Activity
 
     // Live clock for the top bar, refreshed every 30s.
-    var now by remember { mutableStateOf(SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())) }
+    var now by remember { mutableStateOf(SimpleDateFormat("EEE, d MMM - HH:mm", Locale.getDefault()).format(Date())) }
     LaunchedEffect(Unit) {
         while (true) {
-            now = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+            now = SimpleDateFormat("EEE, d MMM - HH:mm", Locale.getDefault()).format(Date())
             delay(30_000)
         }
     }
@@ -258,8 +216,17 @@ fun ChatHome(
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
     PaperGrid(Modifier.fillMaxSize(), wobbly = gridWobbly)
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp)) {
-        // Top bar: persona, live clock, new chat
+        // Top bar: New chat left, date + time center, settings right
         Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = {
+                messages = emptyList()
+                input = ""
+                pendingDraft = null
+                activeProfile = router.activeProfile
+            }) { Text("New chat", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontFamily = roundedFont) }
+            Spacer(Modifier.weight(1f))
+            Text(now, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontFamily = roundedFont)
+            Spacer(Modifier.weight(1f))
             Surface(
                 shape = RoundedCornerShape(50),
                 color = MaterialTheme.colorScheme.primaryContainer,
@@ -267,22 +234,13 @@ fun ChatHome(
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
-                        Icons.Default.Person,
-                        contentDescription = "Assistant",
+                        Icons.Default.Settings,
+                        contentDescription = "Settings",
                         tint = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier.size(17.dp),
                     )
                 }
             }
-            Spacer(Modifier.weight(1f))
-            Text(now, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick = {
-                messages = emptyList()
-                input = ""
-                pendingDraft = null
-                activeProfile = router.activeProfile
-            }) { Text("New chat", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp) }
         }
 
         // Centered helper when the chat is empty
@@ -378,39 +336,6 @@ fun ChatHome(
                 if (note.isNotEmpty()) messages = messages + ChatMessage(false, note)
             }
         }
-        val startListening = {
-            val r = recognizer
-            if (r == null) {
-                messages = messages + ChatMessage(false, "Speech recognition is not available on this device.")
-            } else {
-                r.setRecognitionListener(object : RecognitionListener {
-                    override fun onResults(results: Bundle) {
-                        val text = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                        if (!text.isNullOrBlank()) input = if (input.isBlank()) text else "$input $text"
-                        listening = false
-                    }
-                    override fun onPartialResults(partialResults: Bundle) {
-                        val text = partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
-                        if (!text.isNullOrBlank()) input = text
-                    }
-                    override fun onError(error: Int) { listening = false }
-                    override fun onReadyForSpeech(params: Bundle?) {}
-                    override fun onBeginningOfSpeech() {}
-                    override fun onRmsChanged(rmsdB: Float) {}
-                    override fun onBufferReceived(buffer: ByteArray?) {}
-                    override fun onEndOfSpeech() { listening = false }
-                    override fun onEvent(eventType: Int, params: Bundle?) {}
-                })
-                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                    .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                r.startListening(intent)
-                listening = true
-            }
-        }
-        val audioPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            if (granted) startListening() else messages = messages + ChatMessage(false, "Microphone permission is needed for voice input.")
-        }
         Surface(
             shape = RoundedCornerShape(16.dp),
             color = Color.White,
@@ -422,12 +347,12 @@ fun ChatHome(
                     value = input,
                     onValueChange = { input = it },
                     modifier = Modifier.fillMaxWidth(),
-                    textStyle = TextStyle(color = MaterialTheme.colorScheme.onBackground, fontSize = 15.sp),
+                    textStyle = TextStyle(color = MaterialTheme.colorScheme.onBackground, fontSize = 15.sp, fontFamily = roundedFont),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { send() }),
                     decorationBox = { inner ->
                         Box {
-                            if (input.isEmpty()) Text("Send a message", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f), fontSize = 15.sp)
+                            if (input.isEmpty()) Text("Send a message", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f), fontSize = 15.sp, fontFamily = roundedFont)
                             inner()
                         }
                     },
@@ -437,29 +362,20 @@ fun ChatHome(
                     Surface(
                         shape = RoundedCornerShape(50),
                         color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.clickable {
-                            if (listening) {
-                                recognizer?.stopListening()
-                                listening = false
-                            } else if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                                startListening()
-                            } else {
-                                audioPermission.launch(Manifest.permission.RECORD_AUDIO)
-                            }
-                        },
+                        modifier = Modifier.clickable { send() },
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
                         ) {
                             Icon(
-                                MicIcon,
-                                contentDescription = "Speak",
+                                Icons.AutoMirrored.Filled.Send,
+                                contentDescription = "Send",
                                 tint = Color.White,
                                 modifier = Modifier.size(14.dp),
                             )
                             Text(
-                                if (listening) "Listening..." else "Speak",
+                                "Send",
                                 color = Color.White,
                                 fontSize = 13.sp,
                                 fontFamily = roundedFont,
