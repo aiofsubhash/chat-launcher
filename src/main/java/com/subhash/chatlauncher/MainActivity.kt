@@ -379,8 +379,8 @@ fun ChatHome(
                 Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
                     Spacer(Modifier.weight(1f))
                     Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = Color(0xFFB08968),
+                        shape = RoundedCornerShape(4.dp),
+                        color = Color(0xFFB08968).copy(alpha = 0.8f),
                         modifier = Modifier.clickable { send() },
                     ) {
                         Text(
@@ -692,13 +692,24 @@ fun StickyNote(app: AppEntry, fontFamily: androidx.compose.ui.text.font.FontFami
             .graphicsLayer { rotationZ = tilt }
             .clickable { onLaunch() },
     ) {
-        Text(
-            app.label,
-            color = Color(0xFF5B5340),
-            fontSize = 15.sp,
-            fontFamily = fontFamily,
-            maxLines = 1,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-        )
+        Box {
+            Text(
+                app.label,
+                color = Color(0xFF5B5340),
+                fontSize = 15.sp,
+                fontFamily = fontFamily,
+                maxLines = 1,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            )
+            Canvas(modifier = Modifier.size(14.dp).align(Alignment.TopEnd)) {
+                val path = Path().apply {
+                    moveTo(0f, 0f)
+                    lineTo(size.width, 0f)
+                    lineTo(size.width, size.height)
+                    close()
+                }
+                drawPath(path, Color(0xFFE0D39A))
+            }
+        }
     }
 }
