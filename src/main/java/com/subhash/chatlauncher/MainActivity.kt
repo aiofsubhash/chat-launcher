@@ -24,11 +24,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlin.math.sin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -56,18 +59,35 @@ private val calmColors = lightColorScheme(
 
 /** Faint irregular paper grid behind the chat, matching the calm reference style. */
 @Composable
-fun PaperGrid(modifier: Modifier = Modifier) {
+fun PaperGrid(modifier: Modifier = Modifier, wobbly: Boolean = false) {
     val lineColor = Color(0xFF2E2E2A).copy(alpha = 0.05f)
     Canvas(modifier = modifier) {
         val step = 52.dp.toPx()
+        val amp = if (wobbly) 5.dp.toPx() else 0f
         var x = step / 2
         while (x < size.width) {
-            drawLine(lineColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
+            if (wobbly) {
+                val path = Path()
+                path.moveTo(x, 0f)
+                var y = 0f
+                while (y <= size.height) { path.lineTo(x + sin(y / 55f) * amp, y); y += 14f }
+                drawPath(path, lineColor, style = Stroke(width = 1f))
+            } else {
+                drawLine(lineColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
+            }
             x += step
         }
         var y = step / 2
         while (y < size.height) {
-            drawLine(lineColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+            if (wobbly) {
+                val path = Path()
+                path.moveTo(0f, y)
+                var xx = 0f
+                while (xx <= size.width) { path.lineTo(xx, y + sin(xx / 55f) * amp); xx += 14f }
+                drawPath(path, lineColor, style = Stroke(width = 1f))
+            } else {
+                drawLine(lineColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+            }
             y += step
         }
     }
@@ -164,6 +184,7 @@ fun ChatHome(
     var activeProfile by remember { mutableStateOf(router.activeProfile) }
     var showSettings by remember { mutableStateOf(false) }
     var pendingDraft by remember { mutableStateOf<CommandRouter.Result.DraftMessage?>(null) }
+    var gridWobbly by remember { mutableStateOf(router.gridWobbly) }
     val suggestions = remember(input, activeProfile) { if (input.isBlank()) emptyList() else resolveApps(input) } // resolveApps reads a cached list inside Activity
 
     // Live clock for the top bar, refreshed every 30s.
@@ -176,14 +197,14 @@ fun ChatHome(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-    PaperGrid(Modifier.fillMaxSize())
+    PaperGrid(Modifier.fillMaxSize(), wobbly = gridWobbly)
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp)) {
         // Top bar: persona, live clock, new chat
         Row(verticalAlignment = Alignment.CenterVertically) {
             Surface(
                 shape = RoundedCornerShape(50),
                 color = MaterialTheme.colorScheme.primaryContainer,
-                modifier = Modifier.size(30.dp),
+                modifier = Modifier.size(30.dp).clickable { showSettings = true },
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
@@ -225,8 +246,6 @@ fun ChatHome(
                 },
                 label = { Text(activeProfile?.let { "Focus: $it" } ?: "Focus off") },
             )
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick = { showSettings = true }) { Text("Settings") }
         }
 
         // Centered helper when the chat is empty
@@ -369,6 +388,8 @@ fun ChatHome(
         SettingsDialog(
             router = router,
             allApps = allApps,
+            gridWobbly = gridWobbly,
+            onGridWobbly = { gridWobbly = it; router.gridWobbly = it },
             onClose = { showSettings = false },
         )
     }
@@ -397,7 +418,7 @@ fun HtmlBubble(html: String) {
 }
 
 @Composable
-fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, onClose: () -> Unit) {
+fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, gridWobbly: Boolean, onGridWobbly: (Boolean) -> Unit, onClose: () -> Unit) {
     var key by remember { mutableStateOf(router.apiKey) }
     var profileName by remember { mutableStateOf("") }
     var selected by remember { mutableStateOf(setOf<String>()) }
@@ -421,6 +442,20 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, onClose
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
                     )
+                    Text("Grid style", style = MaterialTheme.typography.titleSmall)
+                    Row(modifier = Modifier.padding(bottom = 12.dp)) {
+                        FilterChip(
+                            selected = !gridWobbly,
+                            onClick = { onGridWobbly(false) },
+                            label = { Text("Straight") },
+                            modifier = Modifier.padding(end = 8.dp),
+                        )
+                        FilterChip(
+                            selected = gridWobbly,
+                            onClick = { onGridWobbly(true) },
+                            label = { Text("Wobbly") },
+                        )
+                    }
                     Text("Focus profiles", style = MaterialTheme.typography.titleSmall)
                     profiles.forEach { p ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
