@@ -6,6 +6,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -16,12 +17,61 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.foundation.background
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+// Calm, paper-like palette: warm off-white background, muted teal accent, soft gray text.
+private val calmColors = lightColorScheme(
+    primary = Color(0xFF3E8E8A),
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFDCECEA),
+    onPrimaryContainer = Color(0xFF1E3A39),
+    secondaryContainer = Color(0xFFF0EFEA),
+    onSecondaryContainer = Color(0xFF46463F),
+    surfaceVariant = Color(0xFFF2F1EC),
+    onSurfaceVariant = Color(0xFF51514A),
+    background = Color(0xFFFBFAF6),
+    onBackground = Color(0xFF2E2E2A),
+    surface = Color(0xFFFBFAF6),
+    onSurface = Color(0xFF2E2E2A),
+    surfaceContainerLow = Color(0xFFF6F5F0),
+    surfaceContainer = Color(0xFFF2F1EC),
+    surfaceContainerHigh = Color(0xFFEDECE6),
+)
+
+/** Faint irregular paper grid behind the chat, matching the calm reference style. */
+@Composable
+fun PaperGrid(modifier: Modifier = Modifier) {
+    val lineColor = Color(0xFF2E2E2A).copy(alpha = 0.05f)
+    Canvas(modifier = modifier) {
+        val step = 52.dp.toPx()
+        var x = step / 2
+        while (x < size.width) {
+            drawLine(lineColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
+            x += step
+        }
+        var y = step / 2
+        while (y < size.height) {
+            drawLine(lineColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+            y += step
+        }
+    }
+}
 
 data class ChatMessage(val fromUser: Boolean, val text: String, val isHtml: Boolean = false)
 
@@ -36,7 +86,7 @@ class MainActivity : ComponentActivity() {
         val prefs = getSharedPreferences("chat_launcher", MODE_PRIVATE)
         router = CommandRouter(this, prefs)
         setContent {
-            MaterialTheme(colorScheme = lightColorScheme()) {
+            MaterialTheme(colorScheme = calmColors) {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 ChatHome(
                     router = router,
@@ -110,16 +160,52 @@ fun ChatHome(
 ) {
     val scope = rememberCoroutineScope()
     var input by remember { mutableStateOf("") }
-    var messages by remember {
-        mutableStateOf(listOf(ChatMessage(false, "Hi. Type an app name, 'focus', 'send ... to name: message', or just talk.")))
-    }
+    var messages by remember { mutableStateOf(listOf<ChatMessage>()) }
     var activeProfile by remember { mutableStateOf(router.activeProfile) }
     var showSettings by remember { mutableStateOf(false) }
     var pendingDraft by remember { mutableStateOf<CommandRouter.Result.DraftMessage?>(null) }
     val suggestions = remember(input, activeProfile) { if (input.isBlank()) emptyList() else resolveApps(input) } // resolveApps reads a cached list inside Activity
 
-    Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-        // Top bar: focus state + settings
+    // Live clock for the top bar, refreshed every 30s.
+    var now by remember { mutableStateOf(SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+            delay(30_000)
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    PaperGrid(Modifier.fillMaxSize())
+    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp)) {
+        // Top bar: persona, live clock, new chat
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier.size(30.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Person,
+                        contentDescription = "Assistant",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(17.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            Text(now, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = {
+                messages = emptyList()
+                input = ""
+                pendingDraft = null
+                activeProfile = router.activeProfile
+            }) { Text("New chat", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp) }
+        }
+
+        // Focus state + settings
         Row(verticalAlignment = Alignment.CenterVertically) {
             FilterChip(
                 selected = activeProfile != null,
@@ -143,6 +229,25 @@ fun ChatHome(
             TextButton(onClick = { showSettings = true }) { Text("Settings") }
         }
 
+        // Centered helper when the chat is empty
+        if (messages.isEmpty()) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        "Hey,",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 26.sp,
+                        fontWeight = FontWeight.Light,
+                    )
+                    Text(
+                        "Type an app name, 'focus', 'send ... to name: message', or just talk.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+            }
+        } else {
         // Chat history
         LazyColumn(modifier = Modifier.weight(1f), reverseLayout = true) {
             items(messages.asReversed()) { msg ->
@@ -164,6 +269,7 @@ fun ChatHome(
                 }
             }
         }
+        }
 
         // App suggestions while typing
         if (suggestions.isNotEmpty()) {
@@ -182,12 +288,19 @@ fun ChatHome(
             }
         }
 
-        // Input
+        // Input: calm rounded composer
         OutlinedTextField(
             value = input,
             onValueChange = { input = it },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("Talk to your phone") },
+            modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp),
+            shape = RoundedCornerShape(26.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                unfocusedBorderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f),
+                focusedContainerColor = Color.White,
+                unfocusedContainerColor = Color.White,
+            ),
+            placeholder = { Text("Talk to your phone", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
             keyboardActions = KeyboardActions(onSend = {
                 val raw = input.trim()
@@ -218,6 +331,7 @@ fun ChatHome(
                 }
             }),
         )
+    }
     }
 
     // Focus-aware draft picker: hidden apps never appear, the user picks and confirms in the target app.
