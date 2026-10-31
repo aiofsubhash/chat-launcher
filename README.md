@@ -8,11 +8,11 @@ Chat is the interface. Instead of a grid of icons, you talk: the launcher interp
 
 ## Use cases (Subhash, Oct 31, 2026)
 
-1. Send this message to a person: "intended message"
-2. Typing "whatsapp" offers to open WhatsApp (same for any app)
-3. Open-ended AI chat, later with rich HTML responses
-4. Phone-execution harness (filesystem + API key + computer use) - later
-5. Focus modes that hide chosen apps, with or without chat
+1. Send this message to a person: "intended message" - opens a share-sheet draft (never auto-sends) [v0.1]
+2. Typing "whatsapp" offers to open WhatsApp (same for any app) [v0.1]
+3. Open-ended AI chat with HTML responses (rendered with JavaScript disabled) [v0.1]
+4. Phone-execution harness (filesystem + API key + computer use) - later, explicitly deferred
+5. Focus modes: named profiles that hide chosen apps [v0.1]
 
 ## Platform
 
