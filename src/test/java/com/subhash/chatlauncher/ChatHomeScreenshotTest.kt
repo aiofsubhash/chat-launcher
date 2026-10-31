@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
@@ -114,7 +116,7 @@ class ChatHomeScreenshotTest {
                     Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
                         Surface(
                             shape = RoundedCornerShape(28.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            color = Color.White,
                         ) {
                             Column(modifier = Modifier.padding(24.dp)) {
                                 Text("Settings", style = MaterialTheme.typography.headlineSmall)
@@ -134,10 +136,26 @@ class ChatHomeScreenshotTest {
                                 }
                                 Row(
                                     horizontalArrangement = Arrangement.End,
+                                    verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier.fillMaxWidth(),
                                 ) {
-                                    TextButton(onClick = {}) { Text("Cancel") }
-                                    TextButton(onClick = {}) { Text("Save") }
+                                    Text(
+                                        "Cancel",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 14.sp,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                                    )
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = Color(0xFFB08968).copy(alpha = 0.8f),
+                                    ) {
+                                        Text(
+                                            "Save",
+                                            color = Color.White,
+                                            fontSize = 14.sp,
+                                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 9.dp),
+                                        )
+                                    }
                                 }
                             }
                         }
