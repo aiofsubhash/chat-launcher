@@ -7,6 +7,9 @@ import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -20,7 +23,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.Alignment
@@ -157,10 +159,10 @@ class MainActivity : ComponentActivity() {
     }
 
     // Installed launchable apps are loaded once; focus filtering and search run on the cached list.
-    private val appListCache by lazy {
+    private fun queryInstalledApps(): List<AppEntry> {
         val pm = packageManager
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        pm.queryIntentActivities(intent, 0)
+        return pm.queryIntentActivities(intent, 0)
             .mapNotNull { ri ->
                 val pkg = ri.activityInfo.packageName
                 if (pkg == packageName) return@mapNotNull null
@@ -169,9 +171,20 @@ class MainActivity : ComponentActivity() {
             }
     }
 
+    private var appListCache: List<AppEntry>? = null
+
+    private fun installedApps(): List<AppEntry> {
+        // Retry when the cache caught nothing (e.g. packages appeared after first query).
+        val cached = appListCache
+        if (!cached.isNullOrEmpty()) return cached
+        val fresh = queryInstalledApps()
+        if (fresh.isNotEmpty()) appListCache = fresh
+        return fresh
+    }
+
     private fun resolveApps(query: String, limit: Int = 6): List<AppEntry> {
         val hidden = router.hiddenNow()
-        return appListCache
+        return installedApps()
             .asSequence()
             .filter { it.packageName !in hidden }
             .filter { query.isBlank() || it.label.contains(query, true) || it.packageName.contains(query, true) }
@@ -200,9 +213,16 @@ fun ChatHome(
     var messages by remember { mutableStateOf(listOf<ChatMessage>()) }
     var activeProfile by remember { mutableStateOf(router.activeProfile) }
     var showSettings by remember { mutableStateOf(false) }
+    var dockPackages by remember { mutableStateOf(router.dockApps) }
     var pendingDraft by remember { mutableStateOf<CommandRouter.Result.DraftMessage?>(null) }
     var gridWobbly by remember { mutableStateOf(router.gridWobbly) }
     val suggestions = remember(input, activeProfile) { if (input.isBlank()) emptyList() else resolveApps(input) } // resolveApps reads a cached list inside Activity
+    // Home dock: user-configured apps (default Maps, Chrome, Spotify, PhonePe), focus-hidden apps stay hidden.
+    // Computed on each recomposition so package changes and dock edits show immediately.
+    val allInstalled = allApps()
+    val focusHidden = router.hiddenNow()
+    val dockApps = dockPackages.mapNotNull { pkg -> allInstalled.firstOrNull { it.packageName == pkg } }
+        .filter { it.packageName !in focusHidden }
 
     // Live clock for the top bar, refreshed every 30s.
     var now by remember { mutableStateOf(SimpleDateFormat("EEE, d MMM - HH:mm", Locale.getDefault()).format(Date())) }
@@ -223,9 +243,9 @@ fun ChatHome(
                 input = ""
                 pendingDraft = null
                 activeProfile = router.activeProfile
-            }) { Text("New chat", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontFamily = roundedFont) }
+            }) { Text("Fresh chat", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontFamily = roundedFont) }
             Spacer(Modifier.weight(1f))
-            Text(now, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontFamily = roundedFont)
+            Text(now, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 17.sp, fontFamily = roundedFont)
             Spacer(Modifier.weight(1f))
             Surface(
                 shape = RoundedCornerShape(50),
@@ -243,27 +263,14 @@ fun ChatHome(
             }
         }
 
-        // Centered helper when the chat is empty
+        // Home dock when the chat is empty: centered, slightly below middle for thumb reach
         if (messages.isEmpty()) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        "Hey,",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 26.sp,
-                        fontFamily = roundedFont,
-                        fontWeight = FontWeight.Medium,
-                        letterSpacing = 0.5.sp,
-                    )
-                    Text(
-                        "Type an app name, 'focus', or 'send ... to name: message'.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        fontSize = 13.sp,
-                        fontFamily = roundedFont,
-                        fontWeight = FontWeight.Normal,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(top = 6.dp),
-                    )
+                Row(
+                    modifier = Modifier.offset(y = 56.dp),
+                    horizontalArrangement = Arrangement.spacedBy(26.dp),
+                ) {
+                    dockApps.forEach { app -> DockIcon(app, roundedFont, onLaunch = { launchApp(app) }) }
                 }
             }
         } else {
@@ -346,13 +353,13 @@ fun ChatHome(
                 BasicTextField(
                     value = input,
                     onValueChange = { input = it },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 88.dp),
                     textStyle = TextStyle(color = MaterialTheme.colorScheme.onBackground, fontSize = 15.sp, fontFamily = roundedFont),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { send() }),
                     decorationBox = { inner ->
                         Box {
-                            if (input.isEmpty()) Text("Send a message", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f), fontSize = 15.sp, fontFamily = roundedFont)
+                            if (input.isEmpty()) Text("write what you want to do", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f), fontSize = 15.sp, fontFamily = roundedFont)
                             inner()
                         }
                     },
@@ -360,28 +367,17 @@ fun ChatHome(
                 Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
                     Spacer(Modifier.weight(1f))
                     Surface(
-                        shape = RoundedCornerShape(50),
-                        color = MaterialTheme.colorScheme.primary,
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color(0xFF2F6FED),
                         modifier = Modifier.clickable { send() },
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.Send,
-                                contentDescription = "Send",
-                                tint = Color.White,
-                                modifier = Modifier.size(14.dp),
-                            )
-                            Text(
-                                "Send",
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontFamily = roundedFont,
-                                modifier = Modifier.padding(start = 6.dp),
-                            )
-                        }
+                        Text(
+                            "Send",
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontFamily = roundedFont,
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 9.dp),
+                        )
                     }
                 }
             }
@@ -424,6 +420,8 @@ fun ChatHome(
         SettingsDialog(
             router = router,
             allApps = allApps,
+            dockApps = dockPackages,
+            onDockApps = { dockPackages = it; router.dockApps = it },
             gridWobbly = gridWobbly,
             onGridWobbly = { gridWobbly = it; router.gridWobbly = it },
             activeProfile = activeProfile,
@@ -456,10 +454,11 @@ fun HtmlBubble(html: String) {
 }
 
 @Composable
-fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, gridWobbly: Boolean, onGridWobbly: (Boolean) -> Unit, activeProfile: String?, onActiveProfile: (String?) -> Unit, onClose: () -> Unit) {
+fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApps: List<String>, onDockApps: (List<String>) -> Unit, gridWobbly: Boolean, onGridWobbly: (Boolean) -> Unit, activeProfile: String?, onActiveProfile: (String?) -> Unit, onClose: () -> Unit) {
     var key by remember { mutableStateOf(router.apiKey) }
     var profileName by remember { mutableStateOf("") }
     var selected by remember { mutableStateOf(setOf<String>()) }
+    var dockSelected by remember { mutableStateOf(dockApps.toSet()) }
     var profiles by remember { mutableStateOf(router.profileNames()) }
     val apps = remember { allApps() }
 
@@ -494,7 +493,25 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, gridWob
                             label = { Text("Wobbly") },
                         )
                     }
-                    Text("Focus profiles", style = MaterialTheme.typography.titleSmall)
+                    Text("Home apps", style = MaterialTheme.typography.titleSmall)
+                    Text("Up to 4 shown in the center of the home screen.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 4.dp))
+                    apps.forEach { app ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable {
+                                dockSelected = if (app.packageName in dockSelected) dockSelected - app.packageName
+                                else if (dockSelected.size < 4) dockSelected + app.packageName
+                                else dockSelected
+                            },
+                        ) {
+                            Checkbox(
+                                checked = app.packageName in dockSelected,
+                                onCheckedChange = null,
+                            )
+                            Text(app.label)
+                        }
+                    }
+                    Text("Focus profiles", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 12.dp))
                     profiles.forEach { p ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(p, modifier = Modifier.weight(1f))
@@ -545,9 +562,48 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, gridWob
                 if (profileName.isNotBlank()) {
                     router.saveProfile(profileName.trim(), selected)
                 }
+                onDockApps(apps.map { it.packageName }.filter { it in dockSelected })
                 onClose()
             }) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } },
     )
+}
+
+
+/** App slot in the home dock: real launcher icon over the app label. */
+@Composable
+fun DockIcon(app: AppEntry, fontFamily: androidx.compose.ui.text.font.FontFamily?, onLaunch: () -> Unit) {
+    val context = LocalContext.current
+    val icon = remember(app.packageName) {
+        runCatching {
+            context.packageManager.getApplicationIcon(app.packageName).toBitmap().asImageBitmap()
+        }.getOrNull()
+    }
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.clickable { onLaunch() },
+    ) {
+        if (icon != null) {
+            Image(bitmap = icon, contentDescription = app.label, modifier = Modifier.size(52.dp))
+        } else {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                modifier = Modifier.size(52.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(app.label.take(1), color = MaterialTheme.colorScheme.onSecondaryContainer, fontSize = 20.sp, fontFamily = fontFamily)
+                }
+            }
+        }
+        Text(
+            app.label,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 12.sp,
+            fontFamily = fontFamily,
+            maxLines = 1,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+    }
 }
