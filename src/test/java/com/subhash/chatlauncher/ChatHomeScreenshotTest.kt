@@ -5,7 +5,18 @@ import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
 import android.content.pm.ResolveInfo
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
@@ -95,22 +106,42 @@ class ChatHomeScreenshotTest {
             AppEntry("PhonePe", "com.phonepe.app", Intent()),
             AppEntry("Gmail", "com.google.android.gm", Intent()),
         )
+        // Renders the real initial state (Appearance + Home apps expanded, rest collapsed)
+        // inside a frame matching the runtime dialog: title, scrollable content, Save/Cancel.
         composeRule.activity.setContent {
             MaterialTheme(colorScheme = calmColors) {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    SettingsContent(
-                        key = "", onKey = {},
-                        profileName = "", onProfileName = {},
-                        selected = emptySet(), onSelected = {},
-                        dockSelected = setOf("com.google.android.apps.maps", "com.android.chrome", "com.spotify.music", "com.phonepe.app"),
-                        onDockSelected = {},
-                        profiles = setOf("Study", "Sleep"),
-                        onToggleProfile = {}, onDeleteProfile = {},
-                        gridWobbly = true, onGridWobbly = {},
-                        activeProfile = "Study",
-                        apps = apps,
-                        expandAll = true,
-                    )
+                    Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                        Surface(
+                            shape = RoundedCornerShape(28.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        ) {
+                            Column(modifier = Modifier.padding(24.dp)) {
+                                Text("Settings", style = MaterialTheme.typography.headlineSmall)
+                                Box(modifier = Modifier.weight(1f, fill = false)) {
+                                    SettingsContent(
+                                        key = "", onKey = {},
+                                        profileName = "", onProfileName = {},
+                                        selected = emptySet(), onSelected = {},
+                                        dockSelected = setOf("com.google.android.apps.maps", "com.android.chrome", "com.spotify.music", "com.phonepe.app"),
+                                        onDockSelected = {},
+                                        profiles = setOf("Study", "Sleep"),
+                                        onToggleProfile = {}, onDeleteProfile = {},
+                                        gridWobbly = true, onGridWobbly = {},
+                                        activeProfile = "Study",
+                                        apps = apps,
+                                    )
+                                }
+                                Row(
+                                    horizontalArrangement = Arrangement.End,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    TextButton(onClick = {}) { Text("Cancel") }
+                                    TextButton(onClick = {}) { Text("Save") }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
