@@ -25,11 +25,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.sp
@@ -64,7 +67,7 @@ private val calmColors = lightColorScheme(
 /** Faint irregular paper grid behind the chat, matching the calm reference style. */
 @Composable
 fun PaperGrid(modifier: Modifier = Modifier, wobbly: Boolean = false) {
-    val lineColor = Color(0xFF6B6B64).copy(alpha = 0.10f)
+    val lineColor = Color(0xFF6B6B64).copy(alpha = 0.17f)
     Canvas(modifier = modifier) {
         val step = 46.dp.toPx()
         val amp = if (wobbly) 2.5.dp.toPx() else 0f
@@ -239,10 +242,10 @@ fun ChatHome(
                 input = ""
                 pendingDraft = null
                 activeProfile = router.activeProfile
-            }) { Text("Fresh chat", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontFamily = roundedFont) }
+            }) { Text("Fresh chat", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 17.sp, fontFamily = roundedFont) }
             Spacer(Modifier.weight(1f))
             // Tweak icon: two parallel lines with knobs, no background, per owner request
-            Box(modifier = Modifier.size(30.dp).clickable { showSettings = true }, contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.size(30.dp).clickable { showSettings = true }.semantics { contentDescription = "Settings" }, contentAlignment = Alignment.Center) {
                 Canvas(Modifier.size(20.dp)) {
                     val c = Color(0xFF6B6B64)
                     val stroke = 1.8.dp.toPx()
@@ -260,10 +263,10 @@ fun ChatHome(
         Text(
             now,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 34.sp,
+            fontSize = 26.sp,
             fontFamily = roundedFont,
             textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+            modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
         )
 
         // Home dock when the chat is empty: centered, slightly below middle for thumb reach
@@ -271,9 +274,12 @@ fun ChatHome(
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Row(
                     modifier = Modifier.offset(y = 56.dp),
-                    horizontalArrangement = Arrangement.spacedBy(26.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    dockApps.forEach { app -> DockIcon(app, roundedFont, onLaunch = { launchApp(app) }) }
+                    val tilts = listOf(-2.5f, 1.5f, -1.5f, 2.5f)
+                    dockApps.forEachIndexed { i, app ->
+                        StickyNote(app, roundedFont, tilt = tilts[i % tilts.size], onLaunch = { launchApp(app) })
+                    }
                 }
             }
         } else {
@@ -574,17 +580,24 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApp
 }
 
 
-/** App slot in the home dock: text only, per owner request. */
+/** Home dock slot: a small sticky note with the app name, per owner request. */
 @Composable
-fun DockIcon(app: AppEntry, fontFamily: androidx.compose.ui.text.font.FontFamily?, onLaunch: () -> Unit) {
-    Text(
-        app.label,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        fontSize = 17.sp,
-        fontFamily = fontFamily,
-        maxLines = 1,
+fun StickyNote(app: AppEntry, fontFamily: androidx.compose.ui.text.font.FontFamily?, tilt: Float, onLaunch: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = Color(0xFFF6EFC1),
+        shadowElevation = 2.dp,
         modifier = Modifier
-            .clickable { onLaunch() }
-            .padding(horizontal = 6.dp, vertical = 12.dp),
-    )
+            .graphicsLayer { rotationZ = tilt }
+            .clickable { onLaunch() },
+    ) {
+        Text(
+            app.label,
+            color = Color(0xFF5B5340),
+            fontSize = 15.sp,
+            fontFamily = fontFamily,
+            maxLines = 1,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+        )
+    }
 }
