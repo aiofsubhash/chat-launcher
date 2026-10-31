@@ -20,16 +20,19 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -379,7 +382,7 @@ fun ChatHome(
                 Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
                     Spacer(Modifier.weight(1f))
                     Surface(
-                        shape = RoundedCornerShape(4.dp),
+                        shape = RoundedCornerShape(6.dp),
                         color = Color(0xFFB08968).copy(alpha = 0.8f),
                         modifier = Modifier.clickable { send() },
                     ) {
@@ -474,9 +477,12 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApp
     var profiles by remember { mutableStateOf(router.profileNames()) }
     val apps = remember { allApps() }
 
+    val settingsContext = LocalContext.current
+    val settingsFont = remember { RoundedTypeface.load(settingsContext) }
     AlertDialog(
         onDismissRequest = onClose,
-        title = { Text("Settings") },
+        containerColor = Color.White,
+        title = { Text("Settings", fontFamily = settingsFont, fontSize = 20.sp, fontWeight = FontWeight.Medium) },
         text = {
             SettingsContent(
                 key = key, onKey = { key = it },
@@ -504,16 +510,30 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApp
             )
         },
         confirmButton = {
-            TextButton(onClick = {
-                router.apiKey = key.trim()
-                if (profileName.isNotBlank()) {
-                    router.saveProfile(profileName.trim(), selected)
-                }
-                onDockApps(apps.map { it.packageName }.filter { it in dockSelected })
-                onClose()
-            }) { Text("Save") }
+            Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = Color(0xFFB08968).copy(alpha = 0.8f),
+                modifier = Modifier.clickable {
+                    router.apiKey = key.trim()
+                    if (profileName.isNotBlank()) {
+                        router.saveProfile(profileName.trim(), selected)
+                    }
+                    onDockApps(apps.map { it.packageName }.filter { it in dockSelected })
+                    onClose()
+                },
+            ) {
+                Text("Save", color = Color.White, fontSize = 14.sp, fontFamily = settingsFont, modifier = Modifier.padding(horizontal = 20.dp, vertical = 9.dp))
+            }
         },
-        dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } },
+        dismissButton = {
+            Text(
+                "Cancel",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 14.sp,
+                fontFamily = settingsFont,
+                modifier = Modifier.clickable { onClose() }.padding(horizontal = 12.dp, vertical = 9.dp),
+            )
+        },
     )
 }
 
@@ -534,24 +554,30 @@ fun SettingsContent(
 ) {
     val settingsContext = LocalContext.current
     val roundedFont = remember { RoundedTypeface.load(settingsContext) }
-    LazyColumn(
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        modifier = Modifier.padding(vertical = 4.dp),
-    ) {
+    LazyColumn(modifier = Modifier.padding(vertical = 4.dp)) {
         item {
             SettingsSection(title = "Appearance", initiallyExpanded = true, expandAll = expandAll, roundedFont = roundedFont) {
-                Text("Grid style", style = MaterialTheme.typography.titleSmall, fontFamily = roundedFont)
-                Row(modifier = Modifier.padding(top = 4.dp)) {
-                    FilterChip(
-                        selected = !gridWobbly,
-                        onClick = { onGridWobbly(false) },
-                        label = { Text("Straight") },
-                        modifier = Modifier.padding(end = 8.dp),
+                Text(
+                    "Grid style",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(modifier = Modifier.padding(top = 2.dp)) {
+                    Text(
+                        "Straight",
+                        fontFamily = roundedFont,
+                        fontSize = 15.sp,
+                        fontWeight = if (!gridWobbly) FontWeight.Medium else FontWeight.Normal,
+                        color = if (!gridWobbly) Color(0xFFB08968) else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.clickable { onGridWobbly(false) }.padding(end = 20.dp, top = 4.dp, bottom = 4.dp),
                     )
-                    FilterChip(
-                        selected = gridWobbly,
-                        onClick = { onGridWobbly(true) },
-                        label = { Text("Wobbly") },
+                    Text(
+                        "Wobbly",
+                        fontFamily = roundedFont,
+                        fontSize = 15.sp,
+                        fontWeight = if (gridWobbly) FontWeight.Medium else FontWeight.Normal,
+                        color = if (gridWobbly) Color(0xFFB08968) else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.clickable { onGridWobbly(true) }.padding(top = 4.dp, bottom = 4.dp),
                     )
                 }
             }
@@ -562,30 +588,43 @@ fun SettingsContent(
                     "Up to 4 shown in the center of the home screen.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 4.dp),
                 )
                 apps.forEach { app ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.clickable {
+                    PaperCheckbox(
+                        checked = app.packageName in dockSelected,
+                        onToggle = {
                             onDockSelected(if (app.packageName in dockSelected) dockSelected - app.packageName
                             else if (dockSelected.size < 4) dockSelected + app.packageName
                             else dockSelected)
                         },
-                    ) {
-                        Checkbox(checked = app.packageName in dockSelected, onCheckedChange = null)
-                        Text(app.label, fontFamily = roundedFont)
-                    }
+                        label = app.label,
+                        roundedFont = roundedFont,
+                    )
                 }
             }
         }
         item {
             SettingsSection(title = "Focus profiles", initiallyExpanded = false, expandAll = expandAll, roundedFont = roundedFont) {
                 profiles.forEach { p ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(p, modifier = Modifier.weight(1f), fontFamily = roundedFont)
-                        TextButton(onClick = { onToggleProfile(p) }) { Text(if (activeProfile == p) "Off" else "Use") }
-                        TextButton(onClick = { onDeleteProfile(p) }) { Text("Delete") }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                    ) {
+                        Text(p, modifier = Modifier.weight(1f), fontFamily = roundedFont, fontSize = 15.sp, color = MaterialTheme.colorScheme.onBackground)
+                        Text(
+                            if (activeProfile == p) "Off" else "Use",
+                            color = Color(0xFFB08968),
+                            fontSize = 14.sp,
+                            fontFamily = roundedFont,
+                            modifier = Modifier.clickable { onToggleProfile(p) }.padding(horizontal = 10.dp, vertical = 6.dp),
+                        )
+                        Text(
+                            "Delete",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 14.sp,
+                            fontFamily = roundedFont,
+                            modifier = Modifier.clickable { onDeleteProfile(p) }.padding(horizontal = 4.dp, vertical = 6.dp),
+                        )
                     }
                 }
                 OutlinedTextField(
@@ -593,35 +632,36 @@ fun SettingsContent(
                     onValueChange = onProfileName,
                     label = { Text("New profile name") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                 )
                 Text(
                     "Apps hidden in this profile:",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp),
+                    modifier = Modifier.padding(top = 8.dp),
                 )
                 apps.forEach { app ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.clickable {
+                    PaperCheckbox(
+                        checked = app.packageName in selected,
+                        onToggle = {
                             onSelected(if (app.packageName in selected) selected - app.packageName
                             else selected + app.packageName)
                         },
-                    ) {
-                        Checkbox(checked = app.packageName in selected, onCheckedChange = null)
-                        Text(app.label, fontFamily = roundedFont)
-                    }
+                        label = app.label,
+                        roundedFont = roundedFont,
+                    )
                 }
             }
         }
         item {
-            SettingsSection(title = "Assistant", initiallyExpanded = false, expandAll = expandAll, roundedFont = roundedFont) {
+            SettingsSection(title = "Assistant", initiallyExpanded = false, expandAll = expandAll, roundedFont = roundedFont, showDivider = false) {
                 OutlinedTextField(
                     value = key,
                     onValueChange = onKey,
                     label = { Text("Anthropic API key") },
                     singleLine = true,
+                    shape = RoundedCornerShape(6.dp),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Text(
@@ -635,81 +675,144 @@ fun SettingsContent(
     }
 }
 
-/** One collapsible settings section with a calm card look. */
+/** One collapsible settings section in the calm paper style: rounded-font header, wobbly divider. */
 @Composable
 fun SettingsSection(
     title: String,
     initiallyExpanded: Boolean,
     expandAll: Boolean,
     roundedFont: androidx.compose.ui.text.font.FontFamily?,
+    showDivider: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     var expanded by rememberSaveable { mutableStateOf(initiallyExpanded || expandAll) }
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { expanded = !expanded }
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-            ) {
-                Text(
-                    title,
-                    fontFamily = roundedFont,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.weight(1f),
-                )
-                Icon(
-                    if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (expanded) {
-                Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
-                    content()
-                }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(vertical = 12.dp),
+        ) {
+            Text(
+                title,
+                fontFamily = roundedFont,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                if (expanded) "\u2212" else "+",
+                fontSize = 18.sp,
+                fontFamily = roundedFont,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (expanded) {
+            Column(modifier = Modifier.padding(start = 2.dp, bottom = 12.dp)) {
+                content()
             }
         }
+        if (showDivider) WobblyDivider()
+    }
+}
+
+/** Hand-drawn wavy separator matching the home grid. */
+@Composable
+fun WobblyDivider() {
+    val color = Color(0xFF6B6B64).copy(alpha = 0.17f)
+    Canvas(modifier = Modifier.fillMaxWidth().height(6.dp)) {
+        val path = Path()
+        val step = 14.dp.toPx()
+        var x = 0f
+        var i = 0
+        path.moveTo(0f, size.height / 2)
+        while (x < size.width) {
+            x += step
+            val y = size.height / 2 + (if (i % 2 == 0) -1.5f else 1.5f) * density
+            path.lineTo(x, y)
+            i++
+        }
+        drawPath(path, color, style = Stroke(width = 1.dp.toPx()))
+    }
+}
+
+/** Hand-drawn checkbox row in the paper style. */
+@Composable
+fun PaperCheckbox(
+    checked: Boolean,
+    onToggle: () -> Unit,
+    label: String,
+    roundedFont: androidx.compose.ui.text.font.FontFamily?,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().clickable { onToggle() }.padding(vertical = 6.dp),
+    ) {
+        Canvas(modifier = Modifier.size(18.dp)) {
+            drawRoundRect(
+                color = Color(0xFF6B6B64),
+                style = Stroke(width = 1.5.dp.toPx()),
+                cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx()),
+            )
+            if (checked) {
+                val p = Path().apply {
+                    moveTo(size.width * 0.22f, size.height * 0.52f)
+                    lineTo(size.width * 0.42f, size.height * 0.72f)
+                    lineTo(size.width * 0.78f, size.height * 0.28f)
+                }
+                drawPath(p, Color(0xFFB08968), style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
+            }
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        Text(label, fontFamily = roundedFont, fontSize = 15.sp, color = MaterialTheme.colorScheme.onBackground)
     }
 }
 
 /** Home dock slot: a small sticky note with the app name, per owner request. */
 @Composable
 fun StickyNote(app: AppEntry, fontFamily: androidx.compose.ui.text.font.FontFamily?, tilt: Float, onLaunch: () -> Unit) {
-    Surface(
-        shape = RoundedCornerShape(4.dp),
-        color = Color(0xFFF6EFC1),
-        shadowElevation = 2.dp,
+    Box(
         modifier = Modifier
             .graphicsLayer { rotationZ = tilt }
             .clickable { onLaunch() },
     ) {
-        Box {
-            Text(
-                app.label,
-                color = Color(0xFF5B5340),
-                fontSize = 15.sp,
-                fontFamily = fontFamily,
-                maxLines = 1,
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            )
-            Canvas(modifier = Modifier.size(14.dp).align(Alignment.TopEnd)) {
-                val path = Path().apply {
-                    moveTo(0f, 0f)
-                    lineTo(size.width, 0f)
-                    lineTo(size.width, size.height)
-                    close()
+        Surface(
+            shape = RoundedCornerShape(6.dp),
+            shadowElevation = 3.dp,
+            modifier = Modifier.padding(top = 7.dp),
+        ) {
+            Box(
+                modifier = Modifier.background(
+                    Brush.verticalGradient(listOf(Color(0xFFFCF4BC), Color(0xFFF4E89A)))
+                ),
+            ) {
+                Text(
+                    app.label,
+                    color = Color(0xFF5B5340),
+                    fontSize = 15.sp,
+                    fontFamily = fontFamily,
+                    maxLines = 1,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
+                )
+                Canvas(modifier = Modifier.size(18.dp).align(Alignment.BottomEnd)) {
+                    val fold = Path().apply {
+                        moveTo(0f, size.height)
+                        lineTo(size.width, 0f)
+                        lineTo(size.width, size.height)
+                        close()
+                    }
+                    drawPath(fold, Color(0xFFE3D488))
                 }
-                drawPath(path, Color(0xFFE0D39A))
             }
         }
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .size(width = 44.dp, height = 14.dp)
+                .graphicsLayer { rotationZ = -tilt / 2f }
+                .background(Color.White.copy(alpha = 0.45f), RoundedCornerShape(3.dp)),
+        )
     }
 }
