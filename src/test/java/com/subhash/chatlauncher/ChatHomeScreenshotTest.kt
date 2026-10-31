@@ -8,6 +8,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.onRoot
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -52,6 +53,9 @@ class ChatHomeScreenshotTest {
         installFakeApp("com.whatsapp", "WhatsApp", canSend = true)
         installFakeApp("com.whatsapp.w4b", "WhatsApp Business", canSend = true)
         installFakeApp("com.android.chrome", "Chrome")
+        installFakeApp("com.google.android.apps.maps", "Maps")
+        installFakeApp("com.spotify.music", "Spotify")
+        installFakeApp("com.phonepe.app", "PhonePe")
         installFakeApp("com.instagram.android", "Instagram")
         installFakeApp("com.android.camera2", "Camera")
         installFakeApp("com.google.android.gm", "Gmail", canSend = true)
@@ -60,13 +64,17 @@ class ChatHomeScreenshotTest {
     @Test
     fun initialHome() {
         composeRule.waitForIdle()
+        // Fake apps install in @Before; poke the composer once so the dock recomputes with them.
+        composeRule.onNodeWithText("write what you want to do").performTextInput("a")
+        composeRule.onNodeWithText("a").performTextClearance()
+        composeRule.waitForIdle()
         composeRule.onRoot().captureRoboImage()
     }
 
     @Test
     fun appSuggestions() {
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Send a message").performTextInput("whats")
+        composeRule.onNodeWithText("write what you want to do").performTextInput("whats")
         composeRule.waitForIdle()
         composeRule.onRoot().captureRoboImage()
     }
@@ -74,7 +82,7 @@ class ChatHomeScreenshotTest {
     @Test
     fun draftPicker() {
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Send a message").performTextInput("send this message to Avinash: hello, running late")
+        composeRule.onNodeWithText("write what you want to do").performTextInput("send this message to Avinash: hello, running late")
         composeRule.onNodeWithText("send this message to Avinash: hello, running late").performImeAction()
         composeRule.waitForIdle()
         composeRule.onAllNodes(isRoot())[1].captureRoboImage()
