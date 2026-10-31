@@ -40,6 +40,7 @@ class MainActivity : ComponentActivity() {
                 ChatHome(
                     router = router,
                     resolveApps = { query -> resolveApps(query) },
+                    shareTargets = { text -> shareTargets(text) },
                     allApps = { resolveApps("", limit = Int.MAX_VALUE) },
                     sendToLlm = { history ->
                         val key = router.apiKey
@@ -49,6 +50,23 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    // Apps that can take a text share draft, filtered by the active focus profile.
+    private fun shareTargets(text: String): List<AppEntry> {
+        val pm = packageManager
+        val send = Intent(Intent.ACTION_SEND).setType("text/plain")
+        val hidden = router.hiddenNow()
+        return pm.queryIntentActivities(send, 0).mapNotNull { ri ->
+            val pkg = ri.activityInfo.packageName
+            if (pkg == packageName || pkg in hidden) return@mapNotNull null
+            val launch = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, text)
+                setClassName(pkg, ri.activityInfo.name)
+            }
+            AppEntry(ri.loadLabel(pm).toString(), pkg, launch)
+        }.sortedBy { it.label }
     }
 
     // Installed launchable apps are loaded once; focus filtering and search run on the cached list.
@@ -83,6 +101,7 @@ class MainActivity : ComponentActivity() {
 fun ChatHome(
     router: CommandRouter,
     resolveApps: (String) -> List<AppEntry>,
+    shareTargets: (String) -> List<AppEntry>,
     allApps: () -> List<AppEntry>,
     sendToLlm: suspend (List<Pair<String, String>>) -> String?,
     launchApp: (AppEntry) -> Unit,
@@ -94,6 +113,7 @@ fun ChatHome(
     }
     var activeProfile by remember { mutableStateOf(router.activeProfile) }
     var showSettings by remember { mutableStateOf(false) }
+    var pendingDraft by remember { mutableStateOf<CommandRouter.Result.DraftMessage?>(null) }
     val suggestions = remember(input, activeProfile) { if (input.isBlank()) emptyList() else resolveApps(input) } // resolveApps reads a cached list inside Activity
 
     Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
@@ -182,6 +202,8 @@ fun ChatHome(
                             isHtml = reply?.contains(Regex("<[a-z]+[ >]")) == true,
                         )
                     }
+                } else if (result is CommandRouter.Result.DraftMessage) {
+                    pendingDraft = result
                 } else {
                     if (result is CommandRouter.Result.Reply && result.text.startsWith("Focus profile '")) {
                         activeProfile = router.activeProfile
@@ -193,6 +215,37 @@ fun ChatHome(
                     if (note.isNotEmpty()) messages = messages + ChatMessage(false, note)
                 }
             }),
+        )
+    }
+
+    // Focus-aware draft picker: hidden apps never appear, the user picks and confirms in the target app.
+    pendingDraft?.let { draft ->
+        val targets = remember(draft) { shareTargets(draft.text) }
+        AlertDialog(
+            onDismissRequest = { pendingDraft = null },
+            title = { Text("Send to ${draft.to}") },
+            text = {
+                if (targets.isEmpty()) {
+                    Text("No app can take this draft (hidden apps stay hidden in focus mode).")
+                } else {
+                    LazyColumn {
+                        items(targets) { app ->
+                            Text(
+                                app.label,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        launchApp(app)
+                                        messages = messages + ChatMessage(false, "Draft opened in ${app.label} for ${draft.to} - confirm there to send.")
+                                        pendingDraft = null
+                                    }
+                                    .padding(vertical = 10.dp),
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { pendingDraft = null }) { Text("Cancel") } },
         )
     }
 
@@ -216,6 +269,7 @@ fun HtmlBubble(html: String) {
                 settings.javaScriptEnabled = false
                 settings.allowFileAccess = false
                 settings.allowContentAccess = false
+                settings.blockNetworkLoads = true // display only: no remote images/tracking
                 webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(view: WebView, request: android.webkit.WebResourceRequest): Boolean = true
                 }
