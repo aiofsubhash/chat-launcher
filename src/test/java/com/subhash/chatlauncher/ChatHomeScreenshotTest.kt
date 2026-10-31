@@ -4,6 +4,11 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
 import android.content.pm.ResolveInfo
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.onNodeWithText
@@ -75,6 +80,39 @@ class ChatHomeScreenshotTest {
     fun appSuggestions() {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("write what you want to do").performTextInput("whats")
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+
+    @Test
+    fun settingsPanel() {
+        val apps = listOf(
+            AppEntry("WhatsApp", "com.whatsapp", Intent()),
+            AppEntry("Chrome", "com.android.chrome", Intent()),
+            AppEntry("Maps", "com.google.android.apps.maps", Intent()),
+            AppEntry("Spotify", "com.spotify.music", Intent()),
+            AppEntry("PhonePe", "com.phonepe.app", Intent()),
+            AppEntry("Gmail", "com.google.android.gm", Intent()),
+        )
+        composeRule.activity.setContent {
+            MaterialTheme(colorScheme = calmColors) {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    SettingsContent(
+                        key = "", onKey = {},
+                        profileName = "", onProfileName = {},
+                        selected = emptySet(), onSelected = {},
+                        dockSelected = setOf("com.google.android.apps.maps", "com.android.chrome", "com.spotify.music", "com.phonepe.app"),
+                        onDockSelected = {},
+                        profiles = setOf("Study", "Sleep"),
+                        onToggleProfile = {}, onDeleteProfile = {},
+                        gridWobbly = true, onGridWobbly = {},
+                        activeProfile = "Study",
+                        apps = apps,
+                    )
+                }
+            }
+        }
         composeRule.waitForIdle()
         composeRule.onRoot().captureRoboImage()
     }
