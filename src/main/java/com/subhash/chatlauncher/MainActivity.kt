@@ -1,8 +1,9 @@
 package com.subhash.chatlauncher
 
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Bundle
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.clickable
@@ -19,10 +20,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.lifecycleScope
+import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.launch
 
-data class ChatMessage(val fromUser: Boolean, val text: String)
+data class ChatMessage(val fromUser: Boolean, val text: String, val isHtml: Boolean = false)
 
 data class AppEntry(val label: String, val packageName: String, val launch: Intent)
 
@@ -35,39 +36,46 @@ class MainActivity : ComponentActivity() {
         val prefs = getSharedPreferences("chat_launcher", MODE_PRIVATE)
         router = CommandRouter(this, prefs)
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    ChatHome(
-                        router = router,
-                        resolveApps = ::resolveApps,
-                        sendToLlm = { history ->
-                            val key = router.apiKey
-                            if (key.isBlank()) null else LlmClient.chat(key, history)
-                        },
-                        launchApp = { app -> startActivity(app.launch) },
-                    )
-                }
+            MaterialTheme {
+                ChatHome(
+                    router = router,
+                    resolveApps = { query -> resolveApps(query) },
+                    allApps = { resolveApps("", limit = Int.MAX_VALUE) },
+                    sendToLlm = { history ->
+                        val key = router.apiKey
+                        if (key.isBlank()) null else LlmClient.chat(key, history)
+                    },
+                    launchApp = { app -> startActivity(app.launch) },
+                )
             }
         }
     }
 
-    private fun resolveApps(query: String): List<AppEntry> {
+    // Installed launchable apps are loaded once; focus filtering and search run on the cached list.
+    private val appListCache by lazy {
         val pm = packageManager
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val hidden = if (router.focusMode) router.focusHidden else emptySet()
-        return pm.queryIntentActivities(intent, 0)
+        pm.queryIntentActivities(intent, 0)
             .mapNotNull { ri ->
                 val pkg = ri.activityInfo.packageName
-                if (pkg == packageName || pkg in hidden) return@mapNotNull null
+                if (pkg == packageName) return@mapNotNull null
                 val launch = pm.getLaunchIntentForPackage(pkg) ?: return@mapNotNull null
                 AppEntry(ri.loadLabel(pm).toString(), pkg, launch)
             }
+    }
+
+    private fun resolveApps(query: String, limit: Int = 6): List<AppEntry> {
+        val hidden = router.hiddenNow()
+        return appListCache
+            .asSequence()
+            .filter { it.packageName !in hidden }
             .filter { query.isBlank() || it.label.contains(query, true) || it.packageName.contains(query, true) }
             .sortedBy {
                 val i = it.label.indexOf(query, ignoreCase = true)
                 if (i < 0) Int.MAX_VALUE else i
             }
-            .take(6)
+            .take(limit)
+            .toList()
     }
 }
 
@@ -75,27 +83,39 @@ class MainActivity : ComponentActivity() {
 fun ChatHome(
     router: CommandRouter,
     resolveApps: (String) -> List<AppEntry>,
+    allApps: () -> List<AppEntry>,
     sendToLlm: suspend (List<Pair<String, String>>) -> String?,
     launchApp: (AppEntry) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     var input by remember { mutableStateOf("") }
-    var messages by remember { mutableStateOf(listOf(ChatMessage(false, "Hi. Type an app name, 'focus', 'send ... to name: message', or just talk."))) }
-    var focusOn by remember { mutableStateOf(router.focusMode) }
+    var messages by remember {
+        mutableStateOf(listOf(ChatMessage(false, "Hi. Type an app name, 'focus', 'send ... to name: message', or just talk.")))
+    }
+    var activeProfile by remember { mutableStateOf(router.activeProfile) }
     var showSettings by remember { mutableStateOf(false) }
-    val suggestions = remember(input) { if (input.isBlank()) emptyList() else resolveApps(input) }
+    val suggestions = remember(input, activeProfile) { if (input.isBlank()) emptyList() else resolveApps(input) } // resolveApps reads a cached list inside Activity
 
     Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-        // Top bar: focus toggle + settings
+        // Top bar: focus state + settings
         Row(verticalAlignment = Alignment.CenterVertically) {
             FilterChip(
-                selected = focusOn,
+                selected = activeProfile != null,
                 onClick = {
-                    focusOn = !focusOn
-                    router.focusMode = focusOn
-                    messages = messages + ChatMessage(false, if (focusOn) "Focus mode on." else "Focus mode off.")
+                    if (activeProfile != null) {
+                        router.activeProfile = null
+                        activeProfile = null
+                        messages = messages + ChatMessage(false, "Focus mode off.")
+                    } else {
+                        val names = router.profileNames()
+                        messages = messages + ChatMessage(
+                            false,
+                            if (names.isEmpty()) "No focus profiles yet - create one in Settings."
+                            else "Say 'focus <name>'. Profiles: ${names.joinToString(", ")}"
+                        )
+                    }
                 },
-                label = { Text(if (focusOn) "Focus on" else "Focus off") },
+                label = { Text(activeProfile?.let { "Focus: $it" } ?: "Focus off") },
             )
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { showSettings = true }) { Text("Settings") }
@@ -113,7 +133,11 @@ fun ChatHome(
                         color = if (msg.fromUser) MaterialTheme.colorScheme.primaryContainer
                         else MaterialTheme.colorScheme.surfaceVariant,
                     ) {
-                        Text(msg.text, modifier = Modifier.padding(10.dp))
+                        if (msg.isHtml) {
+                            HtmlBubble(msg.text)
+                        } else {
+                            Text(msg.text, modifier = Modifier.padding(10.dp))
+                        }
                     }
                 }
             }
@@ -150,14 +174,21 @@ fun ChatHome(
                 messages = messages + ChatMessage(true, raw)
                 val result = router.route(raw, suggestions)
                 if (result is CommandRouter.Result.Reply && result.text.isEmpty()) {
-                    // Plain chat -> LLM if configured
                     scope.launch {
-                        val reply = sendToLlm(
-                            (messages.map { (if (it.fromUser) "user" else "assistant") to it.text })
+                        val reply = sendToLlm(messages.map { (if (it.fromUser) "user" else "assistant") to it.text })
+                        messages = messages + ChatMessage(
+                            false,
+                            reply ?: "No API key yet - open Settings to add one, then I can actually chat.",
+                            isHtml = reply?.contains(Regex("<[a-z]+[ >]")) == true,
                         )
-                        messages = messages + ChatMessage(false, reply ?: "No API key yet - open Settings to add one, then I can actually chat.")
                     }
                 } else {
+                    if (result is CommandRouter.Result.Reply && result.text.startsWith("Focus profile '")) {
+                        activeProfile = router.activeProfile
+                    }
+                    if (result is CommandRouter.Result.Reply && result.text == "Focus mode off.") {
+                        activeProfile = null
+                    }
                     val note = router.execute(result)
                     if (note.isNotEmpty()) messages = messages + ChatMessage(false, note)
                 }
@@ -166,12 +197,46 @@ fun ChatHome(
     }
 
     if (showSettings) {
-        var key by remember { mutableStateOf(router.apiKey) }
-        AlertDialog(
-            onDismissRequest = { showSettings = false },
-            title = { Text("Settings") },
-            text = {
-                Column {
+        SettingsDialog(
+            router = router,
+            allApps = allApps,
+            onClose = { showSettings = false },
+        )
+    }
+}
+
+/** Renders assistant HTML with JavaScript disabled and navigation blocked - display only. */
+@Composable
+fun HtmlBubble(html: String) {
+    AndroidView(
+        factory = { ctx ->
+            WebView(ctx).apply {
+                settings.javaScriptEnabled = false
+                webViewClient = object : WebViewClient() {
+                    @Deprecated("deprecated in Java")
+                    override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean = true
+                }
+                loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
+            }
+        },
+        modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp),
+    )
+}
+
+@Composable
+fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, onClose: () -> Unit) {
+    var key by remember { mutableStateOf(router.apiKey) }
+    var profileName by remember { mutableStateOf("") }
+    var selected by remember { mutableStateOf(setOf<String>()) }
+    var profiles by remember { mutableStateOf(router.profileNames()) }
+    val apps = remember { allApps() }
+
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Settings") },
+        text = {
+            LazyColumn {
+                item {
                     OutlinedTextField(
                         value = key,
                         onValueChange = { key = it },
@@ -179,16 +244,54 @@ fun ChatHome(
                         singleLine = true,
                     )
                     Text(
-                        "Stored only on this device. Needed for open-ended chat; app launching and message drafts work without it.",
+                        "Stored only on this device. Needed for open-ended chat; launching and drafts work without it.",
                         style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 8.dp),
+                        modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
                     )
+                    Text("Focus profiles", style = MaterialTheme.typography.titleSmall)
+                    profiles.forEach { p ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(p, modifier = Modifier.weight(1f))
+                            TextButton(onClick = {
+                                router.deleteProfile(p)
+                                profiles = router.profileNames()
+                            }) { Text("Delete") }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = profileName,
+                        onValueChange = { profileName = it },
+                        label = { Text("New profile name") },
+                        singleLine = true,
+                    )
+                    Text("Apps hidden in this profile:", style = MaterialTheme.typography.bodySmall)
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = { router.apiKey = key.trim(); showSettings = false }) { Text("Save") }
-            },
-            dismissButton = { TextButton(onClick = { showSettings = false }) { Text("Cancel") } },
-        )
-    }
+                items(apps) { app ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable {
+                            selected = if (app.packageName in selected) selected - app.packageName
+                            else selected + app.packageName
+                        },
+                    ) {
+                        Checkbox(
+                            checked = app.packageName in selected,
+                            onCheckedChange = null,
+                        )
+                        Text(app.label)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                router.apiKey = key.trim()
+                if (profileName.isNotBlank()) {
+                    router.saveProfile(profileName.trim(), selected)
+                }
+                onClose()
+            }) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } },
+    )
 }
