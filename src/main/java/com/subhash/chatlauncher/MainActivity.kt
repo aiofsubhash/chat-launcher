@@ -21,7 +21,6 @@ import androidx.compose.runtime.*
 import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -242,18 +241,17 @@ fun ChatHome(
                 activeProfile = router.activeProfile
             }) { Text("Fresh chat", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontFamily = roundedFont) }
             Spacer(Modifier.weight(1f))
-            Surface(
-                shape = RoundedCornerShape(50),
-                color = MaterialTheme.colorScheme.primaryContainer,
-                modifier = Modifier.size(30.dp).clickable { showSettings = true },
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Default.Settings,
-                        contentDescription = "Settings",
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(17.dp),
-                    )
+            // Tweak icon: two parallel lines with knobs, no background, per owner request
+            Box(modifier = Modifier.size(30.dp).clickable { showSettings = true }, contentAlignment = Alignment.Center) {
+                Canvas(Modifier.size(20.dp)) {
+                    val c = Color(0xFF6B6B64)
+                    val stroke = 1.8.dp.toPx()
+                    val x1 = size.width * 0.34f
+                    val x2 = size.width * 0.66f
+                    drawLine(c, Offset(x1, 0f), Offset(x1, size.height), strokeWidth = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                    drawLine(c, Offset(x2, 0f), Offset(x2, size.height), strokeWidth = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                    drawCircle(c, 3.2.dp.toPx(), Offset(x1, size.height * 0.36f))
+                    drawCircle(c, 3.2.dp.toPx(), Offset(x2, size.height * 0.64f))
                 }
             }
         }
