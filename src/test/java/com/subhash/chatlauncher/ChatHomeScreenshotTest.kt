@@ -109,6 +109,7 @@ class ChatHomeScreenshotTest {
                         gridWobbly = true, onGridWobbly = {},
                         activeProfile = "Study",
                         apps = apps,
+                        expandAll = true,
                     )
                 }
             }
