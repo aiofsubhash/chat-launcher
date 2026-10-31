@@ -13,12 +13,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.foundation.background
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,7 +28,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
@@ -46,23 +50,23 @@ private val calmColors = lightColorScheme(
     onPrimaryContainer = Color(0xFF1E3A39),
     secondaryContainer = Color(0xFFF0EFEA),
     onSecondaryContainer = Color(0xFF46463F),
-    surfaceVariant = Color(0xFFF2F1EC),
-    onSurfaceVariant = Color(0xFF51514A),
-    background = Color(0xFFFBFAF6),
-    onBackground = Color(0xFF2E2E2A),
-    surface = Color(0xFFFBFAF6),
-    onSurface = Color(0xFF2E2E2A),
-    surfaceContainerLow = Color(0xFFF6F5F0),
-    surfaceContainer = Color(0xFFF2F1EC),
-    surfaceContainerHigh = Color(0xFFEDECE6),
+    surfaceVariant = Color(0xFFF5F5F2),
+    onSurfaceVariant = Color(0xFF6B6B64),
+    background = Color(0xFFFFFFFF),
+    onBackground = Color(0xFF3A3A36),
+    surface = Color(0xFFFFFFFF),
+    onSurface = Color(0xFF3A3A36),
+    surfaceContainerLow = Color(0xFFF8F8F5),
+    surfaceContainer = Color(0xFFF5F5F2),
+    surfaceContainerHigh = Color(0xFFF0F0EC),
 )
 
 /** Faint irregular paper grid behind the chat, matching the calm reference style. */
 @Composable
 fun PaperGrid(modifier: Modifier = Modifier, wobbly: Boolean = false) {
-    val lineColor = Color(0xFF2E2E2A).copy(alpha = 0.05f)
+    val lineColor = Color(0xFF6B6B64).copy(alpha = 0.10f)
     Canvas(modifier = modifier) {
-        val step = 52.dp.toPx()
+        val step = 46.dp.toPx()
         val amp = if (wobbly) 5.dp.toPx() else 0f
         var x = step / 2
         while (x < size.width) {
@@ -262,6 +266,8 @@ fun ChatHome(
                         "Type an app name, 'focus', 'send ... to name: message', or just talk.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                         fontSize = 13.sp,
+                        fontWeight = FontWeight.Light,
+                        textAlign = TextAlign.Center,
                         modifier = Modifier.padding(top = 6.dp),
                     )
                 }
@@ -307,49 +313,84 @@ fun ChatHome(
             }
         }
 
-        // Input: calm rounded composer
-        OutlinedTextField(
-            value = input,
-            onValueChange = { input = it },
-            modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp),
-            shape = RoundedCornerShape(26.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
-                unfocusedBorderColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f),
-                focusedContainerColor = Color.White,
-                unfocusedContainerColor = Color.White,
-            ),
-            placeholder = { Text("Talk to your phone", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) },
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-            keyboardActions = KeyboardActions(onSend = {
-                val raw = input.trim()
-                if (raw.isEmpty()) return@KeyboardActions
-                input = ""
-                messages = messages + ChatMessage(true, raw)
-                val result = router.route(raw, suggestions)
-                if (result is CommandRouter.Result.Reply && result.text.isEmpty()) {
-                    scope.launch {
-                        val reply = sendToLlm(messages.map { (if (it.fromUser) "user" else "assistant") to it.text })
-                        messages = messages + ChatMessage(
-                            false,
-                            reply ?: "No API key yet - open Settings to add one, then I can actually chat.",
-                            isHtml = reply?.contains(Regex("<[a-z]+[ >]")) == true,
-                        )
-                    }
-                } else if (result is CommandRouter.Result.DraftMessage) {
-                    pendingDraft = result
-                } else {
-                    if (result is CommandRouter.Result.Reply && result.text.startsWith("Focus profile '")) {
-                        activeProfile = router.activeProfile
-                    }
-                    if (result is CommandRouter.Result.Reply && result.text == "Focus mode off.") {
-                        activeProfile = null
-                    }
-                    val note = router.execute(result)
-                    if (note.isNotEmpty()) messages = messages + ChatMessage(false, note)
+        // Input: large inset composer card with inner send pill
+        fun send() {
+            val raw = input.trim()
+            if (raw.isEmpty()) return
+            input = ""
+            messages = messages + ChatMessage(true, raw)
+            val result = router.route(raw, suggestions)
+            if (result is CommandRouter.Result.Reply && result.text.isEmpty()) {
+                scope.launch {
+                    val reply = sendToLlm(messages.map { (if (it.fromUser) "user" else "assistant") to it.text })
+                    messages = messages + ChatMessage(
+                        false,
+                        reply ?: "No API key yet - tap the persona icon to add a key, then I can actually chat.",
+                        isHtml = reply?.contains(Regex("<[a-z]+[ >]")) == true,
+                    )
                 }
-            }),
-        )
+            } else if (result is CommandRouter.Result.DraftMessage) {
+                pendingDraft = result
+            } else {
+                if (result is CommandRouter.Result.Reply && result.text.startsWith("Focus profile '")) {
+                    activeProfile = router.activeProfile
+                }
+                if (result is CommandRouter.Result.Reply && result.text == "Focus mode off.") {
+                    activeProfile = null
+                }
+                val note = router.execute(result)
+                if (note.isNotEmpty()) messages = messages + ChatMessage(false, note)
+            }
+        }
+        Surface(
+            shape = RoundedCornerShape(26.dp),
+            color = Color.White,
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.22f)),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+        ) {
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                BasicTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    textStyle = TextStyle(color = MaterialTheme.colorScheme.onBackground, fontSize = 15.sp),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { send() }),
+                    decorationBox = { inner ->
+                        Box {
+                            if (input.isEmpty()) Text("Send a message", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f), fontSize = 15.sp)
+                            inner()
+                        }
+                    },
+                )
+                Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    Spacer(Modifier.weight(1f))
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable { send() },
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Send,
+                                contentDescription = "Send",
+                                tint = Color.White,
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Text(
+                                "Send",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(start = 6.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
     }
 
