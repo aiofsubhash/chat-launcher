@@ -66,7 +66,7 @@ class ChatHomeScreenshotTest {
     @Test
     fun appSuggestions() {
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Talk to your phone").performTextInput("whats")
+        composeRule.onNodeWithText("Send a message").performTextInput("whats")
         composeRule.waitForIdle()
         composeRule.onRoot().captureRoboImage()
     }
@@ -74,7 +74,7 @@ class ChatHomeScreenshotTest {
     @Test
     fun draftPicker() {
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Talk to your phone").performTextInput("send this message to Avinash: hello, running late")
+        composeRule.onNodeWithText("Send a message").performTextInput("send this message to Avinash: hello, running late")
         composeRule.onNodeWithText("send this message to Avinash: hello, running late").performImeAction()
         composeRule.waitForIdle()
         composeRule.onAllNodes(isRoot())[1].captureRoboImage()
