@@ -36,7 +36,8 @@ class MainActivity : ComponentActivity() {
         val prefs = getSharedPreferences("chat_launcher", MODE_PRIVATE)
         router = CommandRouter(this, prefs)
         setContent {
-            MaterialTheme {
+            MaterialTheme(colorScheme = lightColorScheme()) {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 ChatHome(
                     router = router,
                     resolveApps = { query -> resolveApps(query) },
@@ -48,6 +49,7 @@ class MainActivity : ComponentActivity() {
                     },
                     launchApp = { app -> startActivity(app.launch) },
                 )
+                }
             }
         }
     }
@@ -223,7 +225,7 @@ fun ChatHome(
         val targets = remember(draft) { shareTargets(draft.text) }
         AlertDialog(
             onDismissRequest = { pendingDraft = null },
-            title = { Text("Send to ${draft.to}") },
+            title = { Text("Choose app for draft") },
             text = {
                 if (targets.isEmpty()) {
                     Text("No app can take this draft (hidden apps stay hidden in focus mode).")
