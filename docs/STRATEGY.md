@@ -6,29 +6,26 @@ Phone home screens are grids of icons from 2007. Finding the right app for the t
 
 ## Approach
 
-The home screen is a chat. You say what you want; the launcher brings the app, action, or answer to you.
+The home screen is a chat. "The chat is for everything to do on phone - now I'm talking to my phone" (Subhash, Oct 31, 2026). App launching, message drafts, open-ended AI chat, focus modes; a general execution harness later.
 
 ## Platform decision (Oct 31, 2026)
 
-Android only. Android exposes a documented home-screen role (`ROLE_HOME`, `CATEGORY_HOME`); iOS has no launcher API, so the full vision is only buildable on Android.
+Android only. Android exposes a documented home-screen role (`ROLE_HOME`, `CATEGORY_HOME`); iOS has no launcher API.
 
 ## Persona
 
 Subhash (builder, first user). Wants a phone that works through conversation, not icon hunting.
 
-## Open product question (awaiting decision)
+## Product direction (decided Oct 31, 2026)
 
-- **AI-command chat**: type/say intent, launcher acts (launch app, draft message, answer). Precedents: Saint John, ARIA.
-- **People-chat hub**: conversations as home screen, typed line routes to person + app. Precedent: MinkLauncher.
-
-The brainstorm (`docs/brainstorms/`) starts once this is decided.
+Not a binary AI-command vs people-chat choice: one chat for using the phone. Requirements and phasing live in `docs/plans/2026-10-31-2300-brainstorm-chat-launcher-plan.md`.
 
 ## Key metrics
 
 - Time from unlock to intended action
-- % of actions completed without opening the app grid
+- % of actions completed without opening an app grid
 - Daily active use by first user
 
 ## Process
 
-Compound Engineering loop: brainstorm -> plan -> work -> review -> compound (https://github.com/EveryInc/compound-engineering-plugin).
+Compound Engineering loop: brainstorm -> plan -> work -> review -> compound (https://github.com/EveryInc/compound-engineering-plugin), run as synchronous prompt files.
