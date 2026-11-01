@@ -93,6 +93,16 @@ class ChatHomeScreenshotTest {
         composeRule.onRoot().captureRoboImage()
     }
 
+    /** Chat thread after one device-action exchange: user bubble + assistant handoff note. */
+    @Test
+    fun chatConversation() {
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("uber to airport")
+        composeRule.onNodeWithText("Send").performClick()
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
     @Test
     fun appSuggestions() {
         composeRule.waitForIdle()
