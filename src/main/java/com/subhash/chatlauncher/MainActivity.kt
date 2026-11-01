@@ -542,6 +542,7 @@ fun SettingsPage(
     onSave: () -> Unit,
     switcherInitiallyOpen: Boolean = false,
     pickerInitiallyOpen: Boolean = false,
+    editorInitiallyOpen: Boolean = false,
     initialSection: String? = null,
 ) {
     val settingsContext = LocalContext.current
@@ -580,6 +581,7 @@ fun SettingsPage(
                     editingProfile = editingProfile, onEditProfile = onEditProfile,
                     switcherInitiallyOpen = switcherInitiallyOpen,
                     pickerInitiallyOpen = pickerInitiallyOpen,
+                    editorInitiallyOpen = editorInitiallyOpen,
                     initialSection = initialSection,
                 )
             }
@@ -604,6 +606,7 @@ fun SettingsContent(
     apps: List<AppEntry>,
     switcherInitiallyOpen: Boolean = false,
     pickerInitiallyOpen: Boolean = false,
+    editorInitiallyOpen: Boolean = false,
     initialSection: String? = null,
 ) {
     val settingsContext = LocalContext.current
@@ -626,7 +629,7 @@ fun SettingsContent(
                     fontSize = 17.sp,
                     fontWeight = if (tab == id) FontWeight.Medium else FontWeight.Normal,
                     color = if (tab == id) Color(0xFFB08968) else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.clickable { tab = id }.padding(end = 32.dp, top = 6.dp, bottom = 10.dp),
+                    modifier = Modifier.clickable { tab = id }.padding(end = 22.dp, top = 6.dp, bottom = 10.dp),
                 )
             }
         }
@@ -739,45 +742,65 @@ fun SettingsContent(
                             )
                         }
                     }
-                    Text(
-                        if (editingProfile != null) "Editing \"$editingProfile\"" else "New profile",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 18.dp),
-                    )
-                    if (editingProfile == null) {
-                        OutlinedTextField(
-                            value = profileName,
-                            onValueChange = onProfileName,
-                            label = { Text("New profile name") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(6.dp),
-                            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    var editorOpen by rememberSaveable { mutableStateOf(editorInitiallyOpen) }
+                    if (editorOpen || editingProfile != null) {
+                        Text(
+                            if (editingProfile != null) "Editing \"$editingProfile\"" else "New profile",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 18.dp),
                         )
+                        if (editingProfile == null) {
+                            OutlinedTextField(
+                                value = profileName,
+                                onValueChange = onProfileName,
+                                label = { Text("New profile name") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                            )
+                        } else {
+                            Text(
+                                "Cancel edit",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 15.sp,
+                                fontFamily = roundedFont,
+                                modifier = Modifier.clickable { editorOpen = false; onEditProfile(null) }.padding(top = 4.dp, bottom = 6.dp),
+                            )
+                        }
+                        Text(
+                            if (editingProfile != null) "Apps hidden in $editingProfile:" else "Apps hidden in the new profile:",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+                        apps.forEach { app ->
+                            PaperCheckbox(
+                                checked = app.packageName in selected,
+                                onToggle = {
+                                    onSelected(if (app.packageName in selected) selected - app.packageName
+                                    else selected + app.packageName)
+                                },
+                                label = app.label,
+                                roundedFont = roundedFont,
+                            )
+                        }
+                        if (editingProfile == null) {
+                            Text(
+                                "Done",
+                                color = Color(0xFFB08968),
+                                fontSize = 15.sp,
+                                fontFamily = roundedFont,
+                                modifier = Modifier.clickable { editorOpen = false }.padding(top = 8.dp, bottom = 4.dp),
+                            )
+                        }
                     } else {
                         Text(
-                            "Cancel edit",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            "+ New profile",
+                            color = Color(0xFFB08968),
                             fontSize = 15.sp,
                             fontFamily = roundedFont,
-                            modifier = Modifier.clickable { onEditProfile(null) }.padding(top = 4.dp, bottom = 6.dp),
-                        )
-                    }
-                    Text(
-                        if (editingProfile != null) "Apps hidden in $editingProfile:" else "Apps hidden in the new profile:",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 12.dp),
-                    )
-                    apps.forEach { app ->
-                        PaperCheckbox(
-                            checked = app.packageName in selected,
-                            onToggle = {
-                                onSelected(if (app.packageName in selected) selected - app.packageName
-                                else selected + app.packageName)
-                            },
-                            label = app.label,
-                            roundedFont = roundedFont,
+                            modifier = Modifier.clickable { editorOpen = true }.padding(top = 14.dp, bottom = 6.dp),
                         )
                     }
                 }
