@@ -26,6 +26,8 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextClearance
@@ -118,25 +120,29 @@ class ChatHomeScreenshotTest {
         composeRule.onRoot().captureRoboImage()
     }
 
-    /** Home & customisation subpage: grid toggle + compact home-app summary with Change. */
+    /** Home tab with the new-profile editor intentionally opened. */
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
-    fun settingsPageHome() {
-        settingsPageContent(section = "home")
+    fun settingsPageFocusEditor() {
+        settingsPageContent(section = "home", editorOpen = true)
         composeRule.waitForIdle()
         composeRule.onRoot().captureRoboImage()
     }
 
-    /** Focus subpage: profiles, new profile, hidden apps. */
+    /** Small viewport + enlarged font, picker and editor open: last control reachable by scroll. */
     @Test
-    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
-    fun settingsPageFocus() {
-        settingsPageContent(section = "focus")
+    @Config(sdk = [34], qualifiers = "w320dp-h640dp-xxhdpi", fontScale = 1.3f)
+    fun settingsPageScrollReach() {
+        settingsPageContent(section = "home", pickerOpen = true, editorOpen = true)
+        composeRule.waitForIdle()
+        composeRule.onNode(hasSetTextAction()).performTextInput("Work")
+        composeRule.waitForIdle()
+        composeRule.onAllNodesWithText("Gmail")[1].performScrollTo()
         composeRule.waitForIdle()
         composeRule.onRoot().captureRoboImage()
     }
 
-    private fun settingsPageContent(switcherOpen: Boolean = false, section: String? = null, pickerOpen: Boolean = false, editing: String? = null) {
+    private fun settingsPageContent(switcherOpen: Boolean = false, section: String? = null, pickerOpen: Boolean = false, editing: String? = null, editorOpen: Boolean = false) {
         val apps = listOf(
             AppEntry("WhatsApp", "com.whatsapp", Intent()),
             AppEntry("Chrome", "com.android.chrome", Intent()),
@@ -150,7 +156,7 @@ class ChatHomeScreenshotTest {
                 SettingsPage(
                     key = "", onKey = {},
                     profileName = "", onProfileName = {},
-                    selected = setOf("com.spotify.music"), onSelected = {},
+                    selected = if (editing != null) setOf("com.spotify.music") else emptySet(), onSelected = {},
                     dockSelected = setOf("com.google.android.apps.maps", "com.android.chrome", "com.spotify.music", "com.phonepe.app"),
                     onDockSelected = {},
                     profiles = setOf("Study", "Sleep"),
@@ -162,6 +168,7 @@ class ChatHomeScreenshotTest {
                     onCancel = {}, onSave = {},
                     switcherInitiallyOpen = switcherOpen,
                     pickerInitiallyOpen = pickerOpen,
+                    editorInitiallyOpen = editorOpen,
                     initialSection = section,
                 )
             }
@@ -186,11 +193,11 @@ class ChatHomeScreenshotTest {
         composeRule.onRoot().captureRoboImage()
     }
 
-    /** Assistant & account subpage. */
+    /** Account tab: API key, stored on device only. */
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
-    fun settingsPageAssistant() {
-        settingsPageContent(section = "assistant")
+    fun settingsPageAccount() {
+        settingsPageContent(section = "account")
         composeRule.waitForIdle()
         composeRule.onRoot().captureRoboImage()
     }
@@ -199,7 +206,7 @@ class ChatHomeScreenshotTest {
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
     fun settingsPageFocusEdit() {
-        settingsPageContent(section = "focus", editing = "Study")
+        settingsPageContent(section = "home", editing = "Study")
         composeRule.waitForIdle()
         composeRule.onRoot().captureRoboImage()
     }
@@ -208,7 +215,7 @@ class ChatHomeScreenshotTest {
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
     fun settingsPageFocusDeleteConfirm() {
-        settingsPageContent(section = "focus")
+        settingsPageContent(section = "home")
         composeRule.waitForIdle()
         composeRule.onAllNodesWithText("Delete")[0].performClick()
         composeRule.waitForIdle()

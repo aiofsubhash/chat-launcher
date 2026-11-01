@@ -153,16 +153,16 @@ class CommandRouter(
         is Result.UberRide -> {
             val q = android.net.Uri.encode(result.dropoff)
             val appUri = android.net.Uri.parse("uber://?action=setPickup&pickup=my_location&dropoff[formatted_address]=$q")
-            val webUri = android.net.Uri.parse("https://m.uber.com/ul/?action=setPickup&pickup=my_location&dropoff[formatted_address]=$q")
+            val webUri = android.net.Uri.parse("https://m.uber.com/")
             try {
                 activity.startActivity(Intent(Intent.ACTION_VIEW, appUri))
-                "Opening Uber with dropoff '${result.dropoff}' - confirm the ride there."
+                "Opening Uber with '${result.dropoff}' set as the dropoff - confirm the ride there."
             } catch (e: ActivityNotFoundException) {
                 try {
                     activity.startActivity(Intent(Intent.ACTION_VIEW, webUri))
-                    "Opening Uber with dropoff '${result.dropoff}' - confirm the ride there."
+                    "Uber app not found - opened Uber on the web. Enter '${result.dropoff}' as the destination there."
                 } catch (e2: ActivityNotFoundException) {
-                    "Uber isn't installed - no ride opened."
+                    "Uber isn't available - no ride opened."
                 }
             }
         }

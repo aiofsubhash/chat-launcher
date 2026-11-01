@@ -542,6 +542,7 @@ fun SettingsPage(
     onSave: () -> Unit,
     switcherInitiallyOpen: Boolean = false,
     pickerInitiallyOpen: Boolean = false,
+    editorInitiallyOpen: Boolean = false,
     initialSection: String? = null,
 ) {
     val settingsContext = LocalContext.current
@@ -580,6 +581,7 @@ fun SettingsPage(
                     editingProfile = editingProfile, onEditProfile = onEditProfile,
                     switcherInitiallyOpen = switcherInitiallyOpen,
                     pickerInitiallyOpen = pickerInitiallyOpen,
+                    editorInitiallyOpen = editorInitiallyOpen,
                     initialSection = initialSection,
                 )
             }
@@ -604,61 +606,58 @@ fun SettingsContent(
     apps: List<AppEntry>,
     switcherInitiallyOpen: Boolean = false,
     pickerInitiallyOpen: Boolean = false,
+    editorInitiallyOpen: Boolean = false,
     initialSection: String? = null,
 ) {
     val settingsContext = LocalContext.current
     val roundedFont = remember { RoundedTypeface.load(settingsContext) }
-    var section by rememberSaveable { mutableStateOf(initialSection) }
+    var tab by rememberSaveable { mutableStateOf(initialSection ?: "home") }
 
-    if (section == null) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            ProfileSwitcherRow(
-                activeProfile = activeProfile,
-                profiles = profiles,
-                onToggleProfile = onToggleProfile,
-                roundedFont = roundedFont,
-                initiallyOpen = switcherInitiallyOpen,
-            )
-            NavRow("Home & customisation", roundedFont) { section = "home" }
-            NavRow("Focus", roundedFont) { section = "focus" }
-            NavRow("History", roundedFont) { section = "history" }
-            NavRow("Assistant & account", roundedFont, showDivider = false) { section = "assistant" }
-        }
-    } else {
-        LazyColumn(modifier = Modifier.fillMaxWidth()) {
-            item {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        ProfileSwitcherRow(
+            activeProfile = activeProfile,
+            profiles = profiles,
+            onToggleProfile = onToggleProfile,
+            roundedFont = roundedFont,
+            initiallyOpen = switcherInitiallyOpen,
+        )
+        Row(modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
+            listOf("home" to "Home", "history" to "History", "account" to "Account").forEach { (id, label) ->
                 Text(
-                    "‹ Settings",
+                    label,
                     fontFamily = roundedFont,
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.clickable { section = null }.padding(vertical = 8.dp),
+                    fontSize = 17.sp,
+                    fontWeight = if (tab == id) FontWeight.Medium else FontWeight.Normal,
+                    color = if (tab == id) Color(0xFFB08968) else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.clickable { tab = id }.padding(end = 22.dp, top = 6.dp, bottom = 10.dp),
                 )
             }
-            when (section) {
+        }
+        WobblyDivider()
+        LazyColumn(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+            when (tab) {
                 "home" -> item {
-                    Text("Home & customisation", style = MaterialTheme.typography.titleMedium, fontFamily = roundedFont, modifier = Modifier.padding(bottom = 8.dp))
                     Text(
                         "Grid style",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Row(modifier = Modifier.padding(top = 2.dp)) {
+                    Row(modifier = Modifier.padding(top = 6.dp)) {
                         Text(
                             "Straight",
                             fontFamily = roundedFont,
-                            fontSize = 15.sp,
+                            fontSize = 16.sp,
                             fontWeight = if (!gridWobbly) FontWeight.Medium else FontWeight.Normal,
                             color = if (!gridWobbly) Color(0xFFB08968) else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.clickable { onGridWobbly(false) }.padding(end = 20.dp, top = 4.dp, bottom = 4.dp),
+                            modifier = Modifier.clickable { onGridWobbly(false) }.padding(end = 26.dp, top = 6.dp, bottom = 6.dp),
                         )
                         Text(
                             "Wobbly",
                             fontFamily = roundedFont,
-                            fontSize = 15.sp,
+                            fontSize = 16.sp,
                             fontWeight = if (gridWobbly) FontWeight.Medium else FontWeight.Normal,
                             color = if (gridWobbly) Color(0xFFB08968) else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.clickable { onGridWobbly(true) }.padding(top = 4.dp, bottom = 4.dp),
+                            modifier = Modifier.clickable { onGridWobbly(true) }.padding(top = 6.dp, bottom = 6.dp),
                         )
                     }
                     var editingApps by rememberSaveable { mutableStateOf(pickerInitiallyOpen) }
@@ -666,22 +665,22 @@ fun SettingsContent(
                         "Home apps",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 14.dp),
+                        modifier = Modifier.padding(top = 24.dp),
                     )
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 2.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
                         Text(
                             apps.filter { it.packageName in dockSelected }.joinToString(", ") { it.label }.ifBlank { "None" },
                             fontFamily = roundedFont,
-                            fontSize = 15.sp,
+                            fontSize = 16.sp,
                             color = MaterialTheme.colorScheme.onBackground,
                             modifier = Modifier.weight(1f),
                         )
                         Text(
                             if (editingApps) "Done" else "Change",
                             color = Color(0xFFB08968),
-                            fontSize = 14.sp,
+                            fontSize = 15.sp,
                             fontFamily = roundedFont,
-                            modifier = Modifier.clickable { editingApps = !editingApps }.padding(horizontal = 4.dp, vertical = 6.dp),
+                            modifier = Modifier.clickable { editingApps = !editingApps }.padding(horizontal = 4.dp, vertical = 8.dp),
                         )
                     }
                     if (editingApps) {
@@ -689,7 +688,7 @@ fun SettingsContent(
                             "Up to 4 shown in the center of the home screen.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 4.dp),
+                            modifier = Modifier.padding(top = 6.dp),
                         )
                         apps.forEach { app ->
                             PaperCheckbox(
@@ -704,99 +703,117 @@ fun SettingsContent(
                             )
                         }
                     }
-                }
-                "focus" -> item {
-                    Text("Focus", style = MaterialTheme.typography.titleMedium, fontFamily = roundedFont, modifier = Modifier.padding(bottom = 8.dp))
                     var confirmDelete by rememberSaveable { mutableStateOf<String?>(null) }
                     Text(
-                        "Profiles",
+                        "Focus profiles",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 26.dp),
                     )
                     profiles.forEach { p ->
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                         ) {
-                            Text(p, modifier = Modifier.weight(1f), fontFamily = roundedFont, fontSize = 15.sp, color = MaterialTheme.colorScheme.onBackground)
+                            Text(p, modifier = Modifier.weight(1f), fontFamily = roundedFont, fontSize = 16.sp, color = MaterialTheme.colorScheme.onBackground)
                             Text(
                                 if (activeProfile == p) "Off" else "Use",
                                 color = Color(0xFFB08968),
-                                fontSize = 14.sp,
+                                fontSize = 15.sp,
                                 fontFamily = roundedFont,
-                                modifier = Modifier.clickable { confirmDelete = null; onToggleProfile(p) }.padding(horizontal = 10.dp, vertical = 6.dp),
+                                modifier = Modifier.clickable { confirmDelete = null; onToggleProfile(p) }.padding(horizontal = 12.dp, vertical = 8.dp),
                             )
                             Text(
                                 "Edit",
                                 color = Color(0xFFB08968),
-                                fontSize = 14.sp,
+                                fontSize = 15.sp,
                                 fontFamily = roundedFont,
-                                modifier = Modifier.clickable { confirmDelete = null; onEditProfile(p) }.padding(horizontal = 4.dp, vertical = 6.dp),
+                                modifier = Modifier.clickable { confirmDelete = null; onEditProfile(p) }.padding(horizontal = 6.dp, vertical = 8.dp),
                             )
                             Text(
                                 if (confirmDelete == p) "Confirm delete" else "Delete",
                                 color = if (confirmDelete == p) Color(0xFFB08968) else MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 14.sp,
+                                fontSize = 15.sp,
                                 fontFamily = roundedFont,
                                 modifier = Modifier.clickable {
                                     if (confirmDelete == p) { confirmDelete = null; onDeleteProfile(p) }
                                     else confirmDelete = p
-                                }.padding(horizontal = 4.dp, vertical = 6.dp),
+                                }.padding(horizontal = 6.dp, vertical = 8.dp),
                             )
                         }
                     }
-                    Text(
-                        if (editingProfile != null) "Editing \"$editingProfile\"" else "New profile",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 12.dp),
-                    )
-                    if (editingProfile == null) {
-                        OutlinedTextField(
-                            value = profileName,
-                            onValueChange = onProfileName,
-                            label = { Text("New profile name") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(6.dp),
-                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    var editorOpen by rememberSaveable { mutableStateOf(editorInitiallyOpen) }
+                    if (editorOpen || editingProfile != null) {
+                        Text(
+                            if (editingProfile != null) "Editing \"$editingProfile\"" else "New profile",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 18.dp),
                         )
+                        if (editingProfile == null) {
+                            OutlinedTextField(
+                                value = profileName,
+                                onValueChange = onProfileName,
+                                label = { Text("New profile name") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                            )
+                        } else {
+                            Text(
+                                "Cancel edit",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 15.sp,
+                                fontFamily = roundedFont,
+                                modifier = Modifier.clickable { editorOpen = false; onEditProfile(null) }.padding(top = 4.dp, bottom = 6.dp),
+                            )
+                        }
+                        Text(
+                            if (editingProfile != null) "Apps hidden in $editingProfile:" else "Apps hidden in the new profile:",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+                        apps.forEach { app ->
+                            PaperCheckbox(
+                                checked = app.packageName in selected,
+                                onToggle = {
+                                    onSelected(if (app.packageName in selected) selected - app.packageName
+                                    else selected + app.packageName)
+                                },
+                                label = app.label,
+                                roundedFont = roundedFont,
+                            )
+                        }
+                        if (editingProfile == null) {
+                            Text(
+                                "Done",
+                                color = Color(0xFFB08968),
+                                fontSize = 15.sp,
+                                fontFamily = roundedFont,
+                                modifier = Modifier.clickable { editorOpen = false }.padding(top = 8.dp, bottom = 4.dp),
+                            )
+                        }
                     } else {
                         Text(
-                            "Cancel edit",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 14.sp,
+                            "+ New profile",
+                            color = Color(0xFFB08968),
+                            fontSize = 15.sp,
                             fontFamily = roundedFont,
-                            modifier = Modifier.clickable { onEditProfile(null) }.padding(top = 2.dp, bottom = 4.dp),
-                        )
-                    }
-                    Text(
-                        if (editingProfile != null) "Apps hidden in $editingProfile:" else "Apps hidden in the new profile:",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                    apps.forEach { app ->
-                        PaperCheckbox(
-                            checked = app.packageName in selected,
-                            onToggle = {
-                                onSelected(if (app.packageName in selected) selected - app.packageName
-                                else selected + app.packageName)
-                            },
-                            label = app.label,
-                            roundedFont = roundedFont,
+                            modifier = Modifier.clickable { editorOpen = true }.padding(top = 14.dp, bottom = 6.dp),
                         )
                     }
                 }
                 "history" -> item {
-                    Text("History", style = MaterialTheme.typography.titleMedium, fontFamily = roundedFont, modifier = Modifier.padding(bottom = 8.dp))
+                    Text("History", style = MaterialTheme.typography.titleMedium, fontFamily = roundedFont, modifier = Modifier.padding(bottom = 10.dp))
                     Text(
                         "Not built yet - every chat and ask will live here.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                "assistant" -> item {
-                    Text("Assistant & account", style = MaterialTheme.typography.titleMedium, fontFamily = roundedFont, modifier = Modifier.padding(bottom = 8.dp))
+                "account" -> item {
+                    Text("Account", style = MaterialTheme.typography.titleMedium, fontFamily = roundedFont, modifier = Modifier.padding(bottom = 10.dp))
                     OutlinedTextField(
                         value = key,
                         onValueChange = onKey,
@@ -809,43 +826,11 @@ fun SettingsContent(
                         "Stored only on this device. Needed for open-ended chat; launching and drafts work without it.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 4.dp),
+                        modifier = Modifier.padding(top = 6.dp),
                     )
                 }
             }
         }
-    }
-}
-
-/** One navigation row on the Settings landing page. */
-@Composable
-fun NavRow(
-    title: String,
-    roundedFont: androidx.compose.ui.text.font.FontFamily?,
-    showDivider: Boolean = true,
-    onOpen: () -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().clickable { onOpen() }.padding(vertical = 12.dp),
-        ) {
-            Text(
-                title,
-                fontFamily = roundedFont,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                "›",
-                fontSize = 18.sp,
-                fontFamily = roundedFont,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        if (showDivider) WobblyDivider()
     }
 }
 

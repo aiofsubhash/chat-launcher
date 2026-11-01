@@ -68,8 +68,6 @@ class SettingsFlowTest {
             }
         }
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Focus").performClick()
-        composeRule.waitForIdle()
     }
 
     @Test
@@ -119,6 +117,7 @@ class SettingsFlowTest {
     @Test
     fun cancelDiscardsNewProfile() {
         openFocusSettings()
+        composeRule.onNodeWithText("+ New profile").performClick()
         composeRule.onNode(hasSetTextAction()).performTextInput("Work")
         composeRule.onNodeWithText("Cancel").performClick()
         assertFalse(router.profileNames().contains("Work"))
@@ -127,6 +126,7 @@ class SettingsFlowTest {
     @Test
     fun newProfileSavesWithChosenApps() {
         openFocusSettings()
+        composeRule.onNodeWithText("+ New profile").performClick()
         composeRule.onNode(hasSetTextAction()).performTextInput("Work")
         composeRule.onNodeWithText("Gmail").performClick()
         composeRule.onNodeWithText("Save").performClick()
