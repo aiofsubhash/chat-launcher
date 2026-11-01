@@ -94,6 +94,44 @@ class ChatHomeScreenshotTest {
     }
 
     /** Chat thread after one device-action exchange: user bubble + assistant handoff note. */
+
+    /** Duplicate same-label apps always render an unambiguous inline choice. */
+    @Test
+    fun appDuplicateChoice() {
+        installFakeApp("com.whatsapp.work", "WhatsApp", canSend = true) // same label as personal WhatsApp
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("whatsapp")
+        composeRule.onNodeWithText("Send").performClick()
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Dark theme home: the paper palette's dark variant over the same layout. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun darkHome() {
+        val prefs = composeRule.activity.getSharedPreferences("chat_launcher", android.content.Context.MODE_PRIVATE)
+        prefs.edit().putString("theme_mode", "dark").commit()
+        composeRule.activityRule.scenario.recreate()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("a")
+        composeRule.onNodeWithText("a").performTextClearance()
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+        prefs.edit().remove("theme_mode").commit()
+    }
+
+    /** Large-font home: layout must hold at 1.3x font scale. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi", fontScale = 1.3f)
+    fun largeFontHome() {
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("a")
+        composeRule.onNodeWithText("a").performTextClearance()
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
     @Test
     fun chatConversation() {
         composeRule.waitForIdle()
