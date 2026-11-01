@@ -23,6 +23,11 @@ class CommandRouter(
         get() = prefs.getString("llm_model", "") ?: ""
         set(v) = prefs.edit().putString("llm_model", v).apply()
 
+    /** OpenRouter ids verified zero-priced against the live catalog; empty until the first successful check. */
+    var freeModelIds: Set<String>
+        get() = (prefs.getString("llm_free_ids", "") ?: "").split(',').filter { it.isNotBlank() }.toSet()
+        set(v) = prefs.edit().putString("llm_free_ids", v.joinToString(",")).apply()
+
     var activeProfile: String?
         get() = prefs.getString("active_profile", null)?.takeIf { it.isNotBlank() }
         set(v) = prefs.edit().putString("active_profile", v ?: "").apply()
@@ -161,7 +166,7 @@ class CommandRouter(
             val webUri = android.net.Uri.parse("https://m.uber.com/")
             try {
                 activity.startActivity(Intent(Intent.ACTION_VIEW, appUri))
-                "Opening Uber with '${result.dropoff}' set as the dropoff - confirm the ride there."
+                "Opening Uber with '${result.dropoff}' passed in as the destination - review and confirm the ride there."
             } catch (e: ActivityNotFoundException) {
                 try {
                     activity.startActivity(Intent(Intent.ACTION_VIEW, webUri))
