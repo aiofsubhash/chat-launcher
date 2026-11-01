@@ -50,19 +50,28 @@ object LlmClient {
     }
 
     /**
-     * Free-only gate. Anthropic keys use the account's own models. An OpenRouter id must be
-     * zero-priced in the live catalog when it is available; offline only OpenRouter's
-     * documented :free variants pass. There is no paid fallback.
+     * Free-only gate, fail-closed. Anthropic keys use the account's own models. An OpenRouter
+     * id is allowed only when the live catalog (or a set cached from a successful fetch)
+     * verifies it as zero-priced; if pricing can't be verified the id is rejected, and a
+     * rejected saved model is never silently swapped for another.
      */
     fun isAllowedModel(provider: Provider, model: String, freeIds: Set<String>?): Boolean =
         when (provider) {
             Provider.ANTHROPIC -> true
-            Provider.OPENROUTER -> freeIds?.let { model in it } ?: model.endsWith(":free")
+            Provider.OPENROUTER -> freeIds?.let { model in it } ?: false
         }
 
-    /** Model actually sent: the saved choice when it passes the free-only gate, else the provider default. */
-    fun resolveModel(provider: Provider, saved: String, freeIds: Set<String>?): String =
-        if (saved.isNotBlank() && isAllowedModel(provider, saved, freeIds)) saved else defaultModel(provider)
+    /**
+     * Model to send, or null when a saved OpenRouter choice fails the free-only gate and the
+     * caller must surface that instead of falling back silently. Blank saved = the provider
+     * default, which is always a verified :free id for OpenRouter.
+     */
+    fun gatedModel(provider: Provider, saved: String, freeIds: Set<String>?): String? =
+        when {
+            saved.isBlank() -> defaultModel(provider)
+            isAllowedModel(provider, saved, freeIds) -> saved
+            else -> null
+        }
 
     private const val SYSTEM_PROMPT = "You are the voice of a chat-first Android launcher. Be brief and plain. You cannot perform device actions yourself; the launcher app handles app launches and message drafts. When visual formatting genuinely helps, you may answer in simple HTML (no scripts)."
 
@@ -74,16 +83,22 @@ object LlmClient {
             }
         }
 
-    private fun chatOpenRouter(apiKey: String, model: String, history: List<Pair<String, String>>): String {
+    /** Request body for OpenRouter. max_price 0/0 makes OpenRouter itself refuse non-free routing - provider-side fail-closed, independent of the local gate. */
+    internal fun openRouterBody(model: String, history: List<Pair<String, String>>): String {
         val messages = JSONArray().put(JSONObject().put("role", "system").put("content", SYSTEM_PROMPT))
         for ((role, text) in history.takeLast(10)) {
             messages.put(JSONObject().put("role", role).put("content", text))
         }
-        val body = JSONObject()
+        return JSONObject()
             .put("model", model)
             .put("max_tokens", 1024)
             .put("messages", messages)
+            .put("provider", JSONObject().put("max_price", JSONObject().put("prompt", "0").put("completion", "0")))
             .toString()
+    }
+
+    private fun chatOpenRouter(apiKey: String, model: String, history: List<Pair<String, String>>): String {
+        val body = openRouterBody(model, history)
         val conn = (URL("https://openrouter.ai/api/v1/chat/completions").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 15_000
