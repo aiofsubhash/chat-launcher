@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -95,6 +96,13 @@ val darkCalmColors = darkColorScheme(
 /** WCAG relative luminance and contrast ratio, shared with ContrastTest via the palette. */
 val sendButtonTextColor = Color(0xFF080502)
 val accentBrown = Color(0xFFB08968)
+
+/** Accent for actionable TEXT: darker brown on light surfaces, palette brown on dark - both >=4.5:1. */
+val accentTextLight = Color(0xFF8A5A38)
+val accentTextDark = accentBrown
+val accentText: Color
+    @androidx.compose.runtime.Composable
+    get() = if (MaterialTheme.colorScheme.background.luminance() > 0.5f) accentTextLight else accentTextDark
 
 /** Faint irregular paper grid behind the chat, matching the calm reference style. */
 @Composable
@@ -825,7 +833,7 @@ fun SettingsContent(
                     fontFamily = roundedFont,
                     fontSize = 17.sp,
                     fontWeight = if (tab == id) FontWeight.Bold else FontWeight.Normal,
-                    color = if (tab == id) Color(0xFFB08968) else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (tab == id) accentText else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.clickable { tab = id }.padding(end = 22.dp, top = 6.dp, bottom = 10.dp),
                 )
             }
@@ -845,7 +853,7 @@ fun SettingsContent(
                             fontFamily = roundedFont,
                             fontSize = 16.sp,
                             fontWeight = if (!gridWobbly) FontWeight.Bold else FontWeight.Normal,
-                            color = if (!gridWobbly) Color(0xFFB08968) else MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (!gridWobbly) accentText else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.clickable { onGridWobbly(false) }.padding(end = 26.dp, top = 6.dp, bottom = 6.dp),
                         )
                         Text(
@@ -853,7 +861,7 @@ fun SettingsContent(
                             fontFamily = roundedFont,
                             fontSize = 16.sp,
                             fontWeight = if (gridWobbly) FontWeight.Bold else FontWeight.Normal,
-                            color = if (gridWobbly) accentBrown else MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (gridWobbly) accentText else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.clickable { onGridWobbly(true) }.padding(top = 6.dp, bottom = 6.dp),
                         )
                     }
@@ -871,7 +879,7 @@ fun SettingsContent(
                                 fontFamily = roundedFont,
                                 fontSize = 16.sp,
                                 fontWeight = if (themeMode == mode) FontWeight.Bold else FontWeight.Normal,
-                                color = if (themeMode == mode) accentBrown else MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = if (themeMode == mode) accentText else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.clickable { onThemeMode(mode) }.padding(end = 26.dp, top = 6.dp, bottom = 6.dp),
                             )
                         }
@@ -893,7 +901,7 @@ fun SettingsContent(
                         )
                         Text(
                             if (editingApps) "Done" else "Change",
-                            color = Color(0xFFB08968),
+                            color = accentText,
                             fontSize = 15.sp,
                             fontFamily = roundedFont,
                             modifier = Modifier.clickable { editingApps = !editingApps }.padding(horizontal = 4.dp, vertical = 8.dp),
@@ -934,21 +942,21 @@ fun SettingsContent(
                             Text(p, modifier = Modifier.weight(1f), fontFamily = roundedFont, fontSize = 16.sp, color = MaterialTheme.colorScheme.onBackground)
                             Text(
                                 if (activeProfile == p) "Off" else "Use",
-                                color = Color(0xFFB08968),
+                                color = accentText,
                                 fontSize = 15.sp,
                                 fontFamily = roundedFont,
                                 modifier = Modifier.clickable { confirmDelete = null; onToggleProfile(p) }.padding(horizontal = 12.dp, vertical = 8.dp),
                             )
                             Text(
                                 "Edit",
-                                color = Color(0xFFB08968),
+                                color = accentText,
                                 fontSize = 15.sp,
                                 fontFamily = roundedFont,
                                 modifier = Modifier.clickable { confirmDelete = null; onEditProfile(p) }.padding(horizontal = 6.dp, vertical = 8.dp),
                             )
                             Text(
                                 if (confirmDelete == p) "Confirm delete" else "Delete",
-                                color = if (confirmDelete == p) Color(0xFFB08968) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = if (confirmDelete == p) accentText else MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 15.sp,
                                 fontFamily = roundedFont,
                                 modifier = Modifier.clickable {
@@ -1004,7 +1012,7 @@ fun SettingsContent(
                         if (editingProfile == null) {
                             Text(
                                 "Done",
-                                color = Color(0xFFB08968),
+                                color = accentText,
                                 fontSize = 15.sp,
                                 fontFamily = roundedFont,
                                 modifier = Modifier.clickable { editorOpen = false }.padding(top = 8.dp, bottom = 4.dp),
@@ -1013,7 +1021,7 @@ fun SettingsContent(
                     } else {
                         Text(
                             "+ New profile",
-                            color = Color(0xFFB08968),
+                            color = accentText,
                             fontSize = 15.sp,
                             fontFamily = roundedFont,
                             modifier = Modifier.clickable { editorOpen = true }.padding(top = 14.dp, bottom = 6.dp),
@@ -1062,7 +1070,7 @@ fun SettingsContent(
                         Text(
                             modelStatus,
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFFB08968),
+                            color = accentText,
                             modifier = Modifier.padding(top = 6.dp),
                         )
                     }
@@ -1120,7 +1128,7 @@ fun ProfileSwitcherRow(
                         fontFamily = roundedFont,
                         fontSize = 15.sp,
                         fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
-                        color = if (isActive) Color(0xFFB08968) else MaterialTheme.colorScheme.onBackground,
+                        color = if (isActive) accentText else MaterialTheme.colorScheme.onBackground,
                         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { onToggleProfile(p) }.padding(vertical = 6.dp, horizontal = 4.dp),
                     )
                 }
