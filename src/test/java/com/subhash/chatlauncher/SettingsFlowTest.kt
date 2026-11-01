@@ -10,6 +10,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
@@ -128,6 +129,7 @@ class SettingsFlowTest {
         openFocusSettings()
         composeRule.onNodeWithText("+ New profile").performClick()
         composeRule.onNode(hasSetTextAction()).performTextInput("Work")
+        composeRule.onNodeWithText("Gmail").performScrollTo() // 6th checkbox: below the laid-out viewport
         composeRule.onNodeWithText("Gmail").performClick()
         composeRule.onNodeWithText("Save").performClick()
         assertEquals(setOf("com.google.android.gm"), router.profileHidden("Work"))
