@@ -137,7 +137,7 @@ class MainActivity : ComponentActivity() {
                     allApps = { resolveApps("", limit = Int.MAX_VALUE) },
                     sendToLlm = { history ->
                         val key = router.apiKey
-                        if (key.isBlank()) null else LlmClient.chat(key, history)
+                        if (key.isBlank()) null else LlmClient.chat(key, router.model.ifBlank { LlmClient.defaultModel(LlmClient.providerForKey(key)) }, history)
                     },
                     launchApp = { app -> startActivity(app.launch) },
                 )
@@ -341,7 +341,7 @@ fun ChatHome(
                     val reply = sendToLlm(messages.map { (if (it.fromUser) "user" else "assistant") to it.text })
                     messages = messages + ChatMessage(
                         false,
-                        reply ?: "No API key yet - tap the persona icon to add a key, then I can actually chat.",
+                        reply ?: "No API key yet - add one in Settings > Account, then I can actually chat.",
                         isHtml = reply?.contains(Regex("<[a-z]+[ >]")) == true,
                     )
                 }
@@ -471,6 +471,7 @@ fun HtmlBubble(html: String) {
 @Composable
 fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApps: List<String>, onDockApps: (List<String>) -> Unit, gridWobbly: Boolean, onGridWobbly: (Boolean) -> Unit, activeProfile: String?, onActiveProfile: (String?) -> Unit, onClose: () -> Unit) {
     var key by remember { mutableStateOf(router.apiKey) }
+    var model by remember { mutableStateOf(router.model) }
     var profileName by remember { mutableStateOf("") }
     var selected by remember { mutableStateOf(setOf<String>()) }
     var dockSelected by remember { mutableStateOf(dockApps.toSet()) }
@@ -482,6 +483,7 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApp
 
     SettingsPage(
         key = key, onKey = { key = it },
+        model = model, onModel = { model = it },
         profileName = profileName, onProfileName = { profileName = it },
         selected = selected, onSelected = { selected = it },
         dockSelected = dockSelected, onDockSelected = { dockSelected = it },
@@ -505,6 +507,7 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApp
         onCancel = onClose,
         onSave = {
             router.apiKey = key.trim()
+            router.model = model.trim()
             val finalHidden = stagedHidden.toMutableMap()
             val editing = editingProfile
             if (editing != null) {
@@ -527,6 +530,7 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApp
 @Composable
 fun SettingsPage(
     key: String, onKey: (String) -> Unit,
+    model: String = "", onModel: (String) -> Unit = {},
     profileName: String, onProfileName: (String) -> Unit,
     selected: Set<String>, onSelected: (Set<String>) -> Unit,
     dockSelected: Set<String>, onDockSelected: (Set<String>) -> Unit,
@@ -570,6 +574,7 @@ fun SettingsPage(
             Box(modifier = Modifier.weight(1f, fill = false)) {
                 SettingsContent(
                     key = key, onKey = onKey,
+                    model = model, onModel = onModel,
                     profileName = profileName, onProfileName = onProfileName,
                     selected = selected, onSelected = onSelected,
                     dockSelected = dockSelected, onDockSelected = onDockSelected,
@@ -593,6 +598,7 @@ fun SettingsPage(
 @Composable
 fun SettingsContent(
     key: String, onKey: (String) -> Unit,
+    model: String = "", onModel: (String) -> Unit = {},
     profileName: String, onProfileName: (String) -> Unit,
     selected: Set<String>, onSelected: (Set<String>) -> Unit,
     dockSelected: Set<String>, onDockSelected: (Set<String>) -> Unit,
@@ -824,6 +830,20 @@ fun SettingsContent(
                     )
                     Text(
                         "Stored only on this device. Needed for open-ended chat; launching and drafts work without it.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                    OutlinedTextField(
+                        value = model,
+                        onValueChange = onModel,
+                        label = { Text("Model (optional)") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                    )
+                    Text(
+                        "Anthropic key: Claude by default. OpenRouter key (sk-or-...): free Nemotron by default - paste any OpenRouter model id to change it.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 6.dp),
