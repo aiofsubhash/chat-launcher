@@ -71,6 +71,19 @@ class CommandRouter(
         fun prioritizeWork(apps: List<AppEntry>, workMode: Boolean): List<AppEntry> =
             if (workMode) apps.sortedByDescending { it.isWork } else apps
 
+        /** 30-minute idle reset: fresh chat only when nothing unsent and no question is pending. */
+        fun shouldResetChat(idleMillis: Long, hasMessages: Boolean, hasDraft: Boolean, hasPendingQuestion: Boolean): Boolean =
+            idleMillis > 30L * 60 * 1000 && hasMessages && !hasDraft && !hasPendingQuestion
+
+        /** Installed-only share targets: drop this launcher and focus-hidden entries, sort by label. */
+        fun shareTargetsOf(resolved: List<Pair<String, String>>, selfPackage: String, hidden: Set<String>): List<Pair<String, String>> =
+            resolved.filter { it.second != selfPackage && it.second !in hidden }.sortedBy { it.first }
+
+        /** Truthful launch failure; a failed work-profile launch never falls back to the personal app. */
+        fun launchFailureMessage(app: AppEntry): String =
+            if (app.isWork) "Couldn't open ${app.displayLabel} - the work profile may be paused or locked. Unpause it in system settings and try again; I won't open the personal app instead."
+            else "Couldn't open ${app.label}"
+
         val DEFAULT_DOCK_APPS = listOf(
             "com.google.android.apps.maps",
             "com.android.chrome",
@@ -145,10 +158,17 @@ class CommandRouter(
     fun execute(result: Result): String = when (result) {
         is Result.ChooseApp -> "" // resolved inline by the conversation UI
         is Result.Launch -> try {
-            activity.startActivity(result.app.launch)
-            "Opening ${result.app.label}"
-        } catch (e: ActivityNotFoundException) {
-            "Couldn't open ${result.app.label}"
+            val handle = result.app.userHandle
+            if (result.app.isWork && handle != null) {
+                // Work-profile entries must start through LauncherApps; a raw startActivity fails.
+                activity.getSystemService(android.content.pm.LauncherApps::class.java)
+                    .startMainActivity(result.app.launch.component, handle, null, null)
+            } else {
+                activity.startActivity(result.app.launch)
+            }
+            "Opening ${result.app.displayLabel}"
+        } catch (e: Exception) {
+            launchFailureMessage(result.app)
         }
         is Result.DraftMessage -> {
             val intent = Intent(Intent.ACTION_SEND).apply {
@@ -174,7 +194,7 @@ class CommandRouter(
             val webUri = android.net.Uri.parse("https://m.uber.com/")
             try {
                 activity.startActivity(Intent(Intent.ACTION_VIEW, appUri))
-                "Opening Uber with '${result.dropoff}' passed in as the destination - review and confirm the ride there."
+                "Opening Uber with '${result.dropoff}' as destination text - check it there and confirm the ride yourself."
             } catch (e: ActivityNotFoundException) {
                 try {
                     activity.startActivity(Intent(Intent.ACTION_VIEW, webUri))
