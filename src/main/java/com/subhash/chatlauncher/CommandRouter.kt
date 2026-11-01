@@ -68,7 +68,8 @@ class CommandRouter(
     sealed interface Result {
         data class Reply(val text: String) : Result
         data class Launch(val app: AppEntry) : Result
-        data class DraftMessage(val to: String, val text: String) : Result
+        data class DraftMessage(val to: String, val text: String, val pkg: String? = null) : Result
+        data class UberRide(val dropoff: String) : Result
     }
 
     fun route(raw: String, suggestions: List<AppEntry>): Result {
@@ -101,11 +102,19 @@ class CommandRouter(
         }
 
         // "send this message to X: text" / "send X text via whatsapp"
-        val toMatch = Regex("""(?i)^send\s+(?:this message to\s+)?([A-Za-z][\w .]*?)(?::|\s+via\s+\w+)\s+(.+)$""").find(input)
+        val toMatch = Regex("""(?i)^send\s+(?:this message to\s+)?([A-Za-z][\w .]*?)(?::|\s+via\s+(\w+))\s+(.+)$""").find(input)
         if (toMatch != null) {
             val to = toMatch.groupValues[1].trim()
-            val text = toMatch.groupValues[2].trim().trim('"')
-            return Result.DraftMessage(to, text)
+            val via = toMatch.groupValues[2]
+            val text = toMatch.groupValues[3].trim().trim('"')
+            val pkg = if (via.contains("whats", true)) "com.whatsapp" else null
+            return Result.DraftMessage(to, text, pkg)
+        }
+
+        // "uber to X" / "ride to X" - opens Uber with the dropoff filled in; the user confirms there.
+        val rideMatch = Regex("""(?i)^(?:uber|ride|cab)\s+(?:to\s+)?(.+)$""").find(input)
+        if (rideMatch != null) {
+            return Result.UberRide(rideMatch.groupValues[1].trim().trim('"'))
         }
 
         // App launch: exact match wins, single suggestion launches, otherwise chat
@@ -127,12 +136,34 @@ class CommandRouter(
             val intent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
                 putExtra(Intent.EXTRA_TEXT, result.text)
+                if (result.pkg != null) setPackage(result.pkg)
             }
             try {
-                activity.startActivity(Intent.createChooser(intent, "Send to ${result.to}"))
-                "Draft ready for ${result.to} - pick the chat to drop it in."
+                activity.startActivity(intent)
+                "Draft ready in ${if (result.pkg != null) "WhatsApp" else "share"} for ${result.to} - pick the chat and tap send."
             } catch (e: ActivityNotFoundException) {
-                "No app can take that draft."
+                try {
+                    activity.startActivity(Intent.createChooser(Intent(intent).setPackage(null), "Send to ${result.to}"))
+                    "Draft ready for ${result.to} - pick the chat to drop it in."
+                } catch (e2: ActivityNotFoundException) {
+                    "No app can take that draft."
+                }
+            }
+        }
+        is Result.UberRide -> {
+            val q = android.net.Uri.encode(result.dropoff)
+            val appUri = android.net.Uri.parse("uber://?action=setPickup&pickup=my_location&dropoff[formatted_address]=$q")
+            val webUri = android.net.Uri.parse("https://m.uber.com/ul/?action=setPickup&pickup=my_location&dropoff[formatted_address]=$q")
+            try {
+                activity.startActivity(Intent(Intent.ACTION_VIEW, appUri))
+                "Opening Uber with dropoff '${result.dropoff}' - confirm the ride there."
+            } catch (e: ActivityNotFoundException) {
+                try {
+                    activity.startActivity(Intent(Intent.ACTION_VIEW, webUri))
+                    "Opening Uber with dropoff '${result.dropoff}' - confirm the ride there."
+                } catch (e2: ActivityNotFoundException) {
+                    "Uber isn't installed - no ride opened."
+                }
             }
         }
         is Result.Reply -> result.text

@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
@@ -23,6 +25,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performImeAction
@@ -96,8 +100,43 @@ class ChatHomeScreenshotTest {
     }
 
 
+    /** Settings landing page: profile row above nav, sections as destinations. */
     @Test
-    fun settingsPanel() {
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsPageInitial() {
+        settingsPageContent()
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Settings landing page with the current-profile switcher open. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsPageSwitcher() {
+        settingsPageContent(switcherOpen = true)
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Home & customisation subpage: grid toggle + compact home-app summary with Change. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsPageHome() {
+        settingsPageContent(section = "home")
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Focus subpage: profiles, new profile, hidden apps. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsPageFocus() {
+        settingsPageContent(section = "focus")
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    private fun settingsPageContent(switcherOpen: Boolean = false, section: String? = null, pickerOpen: Boolean = false, editing: String? = null) {
         val apps = listOf(
             AppEntry("WhatsApp", "com.whatsapp", Intent()),
             AppEntry("Chrome", "com.android.chrome", Intent()),
@@ -106,45 +145,72 @@ class ChatHomeScreenshotTest {
             AppEntry("PhonePe", "com.phonepe.app", Intent()),
             AppEntry("Gmail", "com.google.android.gm", Intent()),
         )
-        // Renders the real initial state (Appearance + Home apps expanded, rest collapsed)
-        // inside a frame matching the runtime dialog: title, scrollable content, Save/Cancel.
         composeRule.activity.setContent {
             MaterialTheme(colorScheme = calmColors) {
-                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-                        Surface(
-                            shape = RoundedCornerShape(28.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        ) {
-                            Column(modifier = Modifier.padding(24.dp)) {
-                                Text("Settings", style = MaterialTheme.typography.headlineSmall)
-                                Box(modifier = Modifier.weight(1f, fill = false)) {
-                                    SettingsContent(
-                                        key = "", onKey = {},
-                                        profileName = "", onProfileName = {},
-                                        selected = emptySet(), onSelected = {},
-                                        dockSelected = setOf("com.google.android.apps.maps", "com.android.chrome", "com.spotify.music", "com.phonepe.app"),
-                                        onDockSelected = {},
-                                        profiles = setOf("Study", "Sleep"),
-                                        onToggleProfile = {}, onDeleteProfile = {},
-                                        gridWobbly = true, onGridWobbly = {},
-                                        activeProfile = "Study",
-                                        apps = apps,
-                                    )
-                                }
-                                Row(
-                                    horizontalArrangement = Arrangement.End,
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    TextButton(onClick = {}) { Text("Cancel") }
-                                    TextButton(onClick = {}) { Text("Save") }
-                                }
-                            }
-                        }
-                    }
-                }
+                SettingsPage(
+                    key = "", onKey = {},
+                    profileName = "", onProfileName = {},
+                    selected = setOf("com.spotify.music"), onSelected = {},
+                    dockSelected = setOf("com.google.android.apps.maps", "com.android.chrome", "com.spotify.music", "com.phonepe.app"),
+                    onDockSelected = {},
+                    profiles = setOf("Study", "Sleep"),
+                    onToggleProfile = {}, onDeleteProfile = {},
+                    editingProfile = editing, onEditProfile = {},
+                    gridWobbly = true, onGridWobbly = {},
+                    activeProfile = "Study",
+                    apps = apps,
+                    onCancel = {}, onSave = {},
+                    switcherInitiallyOpen = switcherOpen,
+                    pickerInitiallyOpen = pickerOpen,
+                    initialSection = section,
+                )
             }
         }
+    }
+
+    /** Home & customisation with the installed-app picker open via Change. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsPagePicker() {
+        settingsPageContent(section = "home", pickerOpen = true)
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** History subpage: truthfully labelled as not built yet. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsPageHistory() {
+        settingsPageContent(section = "history")
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Assistant & account subpage. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsPageAssistant() {
+        settingsPageContent(section = "assistant")
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Focus subpage while editing an existing profile's hidden apps. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsPageFocusEdit() {
+        settingsPageContent(section = "focus", editing = "Study")
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Delete asks for a second tap (Confirm delete) before removing a profile. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsPageFocusDeleteConfirm() {
+        settingsPageContent(section = "focus")
+        composeRule.waitForIdle()
+        composeRule.onAllNodesWithText("Delete")[0].performClick()
         composeRule.waitForIdle()
         composeRule.onRoot().captureRoboImage()
     }
