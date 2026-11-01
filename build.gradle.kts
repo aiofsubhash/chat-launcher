@@ -13,8 +13,8 @@ android {
         applicationId = "com.subhash.chatlauncher"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
 
     buildFeatures { compose = true }
@@ -41,6 +41,7 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.13")
     testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("org.json:json:20231013")
     testImplementation("io.github.takahirom.roborazzi:roborazzi:1.20.0")
     testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.20.0")
 }
