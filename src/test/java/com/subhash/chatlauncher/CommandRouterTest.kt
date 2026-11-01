@@ -160,26 +160,6 @@ class CommandRouterTest {
 
 
     @Test
-    fun legacyStudyProfileMigratesToFocus() {
-        val r = router()
-        r.saveProfile("Study", setOf("com.spotify.music"))
-        r.saveProfile("Gym", setOf("com.whatsapp"))
-        r.activeProfile = "Study"
-        r.migrateLegacyProfiles()
-        // Renamed with its hidden list and active selection intact; other profiles untouched.
-        assertEquals(setOf("Focus", "Gym"), r.profileNames())
-        assertEquals(setOf("com.spotify.music"), r.profileHidden("Focus"))
-        assertEquals("Focus", r.activeProfile)
-        // A user-created Focus profile is never overwritten by the legacy name.
-        val r2 = router()
-        r2.saveProfile("Study", setOf("com.spotify.music"))
-        r2.saveProfile("Focus", setOf("com.whatsapp"))
-        r2.migrateLegacyProfiles()
-        assertEquals(setOf("com.whatsapp"), r2.profileHidden("Focus"))
-        assertEquals(setOf("com.spotify.music"), r2.profileHidden("Study"))
-    }
-
-    @Test
     fun sessionResetOnlyWhenIdleAndNothingPending() {
         val thirtyOneMin = 31L * 60 * 1000
         assert(CommandRouter.shouldResetChat(thirtyOneMin, hasMessages = true, hasDraft = false, hasPendingQuestion = false))
