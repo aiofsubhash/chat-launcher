@@ -71,4 +71,33 @@ class CommandRouterTest {
         val r = router().route("whatsapp", apps)
         assertTrue(r is CommandRouter.Result.Launch && (r as CommandRouter.Result.Launch).app.packageName == "com.whatsapp")
     }
+
+    @Test
+    fun duplicatePersonalAndWorkAppAlwaysAsks() {
+        val apps = listOf(
+            AppEntry("Gmail", "com.google.android.gm", android.content.Intent(), isWork = false),
+            AppEntry("Gmail", "com.google.android.gm", android.content.Intent(), isWork = true),
+        )
+        val r = router().route("gmail", apps)
+        assert(r is CommandRouter.Result.ChooseApp) { "expected ChooseApp, got $r" }
+        org.junit.Assert.assertEquals(2, (r as CommandRouter.Result.ChooseApp).apps.size)
+    }
+
+    @Test
+    fun workModeSortsWorkAppsFirst() {
+        val apps = listOf(
+            AppEntry("Gmail", "com.google.android.gm", android.content.Intent(), isWork = false),
+            AppEntry("Gmail", "com.google.android.gm", android.content.Intent(), isWork = true),
+        )
+        org.junit.Assert.assertEquals(false, CommandRouter.prioritizeWork(apps, false).first().isWork)
+        org.junit.Assert.assertEquals(true, CommandRouter.prioritizeWork(apps, true).first().isWork)
+    }
+
+    @Test
+    fun briefcaseMarksWorkEntries() {
+        val work = AppEntry("Gmail", "com.google.android.gm", android.content.Intent(), isWork = true)
+        val personal = AppEntry("Gmail", "com.google.android.gm", android.content.Intent(), isWork = false)
+        org.junit.Assert.assertEquals("\uD83D\uDCBC Gmail", work.displayLabel)
+        org.junit.Assert.assertEquals("Gmail", personal.displayLabel)
+    }
 }
