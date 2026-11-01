@@ -118,20 +118,11 @@ class ChatHomeScreenshotTest {
         composeRule.onRoot().captureRoboImage()
     }
 
-    /** Home & customisation subpage: grid toggle + compact home-app summary with Change. */
-    @Test
-    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
-    fun settingsPageHome() {
-        settingsPageContent(section = "home")
-        composeRule.waitForIdle()
-        composeRule.onRoot().captureRoboImage()
-    }
-
     /** Focus subpage: profiles, new profile, hidden apps. */
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
     fun settingsPageFocus() {
-        settingsPageContent(section = "focus")
+        settingsPageContent(section = "home")
         composeRule.waitForIdle()
         composeRule.onRoot().captureRoboImage()
     }
@@ -186,11 +177,11 @@ class ChatHomeScreenshotTest {
         composeRule.onRoot().captureRoboImage()
     }
 
-    /** Assistant & account subpage. */
+    /** Account tab: API key, stored on device only. */
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
-    fun settingsPageAssistant() {
-        settingsPageContent(section = "assistant")
+    fun settingsPageAccount() {
+        settingsPageContent(section = "account")
         composeRule.waitForIdle()
         composeRule.onRoot().captureRoboImage()
     }
@@ -199,7 +190,7 @@ class ChatHomeScreenshotTest {
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
     fun settingsPageFocusEdit() {
-        settingsPageContent(section = "focus", editing = "Study")
+        settingsPageContent(section = "home", editing = "Study")
         composeRule.waitForIdle()
         composeRule.onRoot().captureRoboImage()
     }
@@ -208,7 +199,7 @@ class ChatHomeScreenshotTest {
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
     fun settingsPageFocusDeleteConfirm() {
-        settingsPageContent(section = "focus")
+        settingsPageContent(section = "home")
         composeRule.waitForIdle()
         composeRule.onAllNodesWithText("Delete")[0].performClick()
         composeRule.waitForIdle()
