@@ -98,8 +98,43 @@ class ChatHomeScreenshotTest {
     }
 
 
+    /** Settings landing page: profile row above nav, sections as destinations. */
     @Test
-    fun settingsPanel() {
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsPageInitial() {
+        settingsPageContent()
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Settings landing page with the current-profile switcher open. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsPageSwitcher() {
+        settingsPageContent(switcherOpen = true)
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Home & customisation subpage: grid toggle + compact home-app summary with Change. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsPageHome() {
+        settingsPageContent(section = "home")
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Focus subpage: profiles, new profile, hidden apps. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsPageFocus() {
+        settingsPageContent(section = "focus")
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    private fun settingsPageContent(switcherOpen: Boolean = false, section: String? = null) {
         val apps = listOf(
             AppEntry("WhatsApp", "com.whatsapp", Intent()),
             AppEntry("Chrome", "com.android.chrome", Intent()),
@@ -108,63 +143,25 @@ class ChatHomeScreenshotTest {
             AppEntry("PhonePe", "com.phonepe.app", Intent()),
             AppEntry("Gmail", "com.google.android.gm", Intent()),
         )
-        // Renders the real initial state (Appearance + Home apps expanded, rest collapsed)
-        // inside a frame matching the runtime dialog: title, scrollable content, Save/Cancel.
         composeRule.activity.setContent {
             MaterialTheme(colorScheme = calmColors) {
-                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-                        Surface(
-                            shape = RoundedCornerShape(28.dp),
-                            color = Color.White,
-                        ) {
-                            Column(modifier = Modifier.padding(24.dp)) {
-                                Text("Settings", style = MaterialTheme.typography.headlineSmall)
-                                Box(modifier = Modifier.weight(1f, fill = false)) {
-                                    SettingsContent(
-                                        key = "", onKey = {},
-                                        profileName = "", onProfileName = {},
-                                        selected = emptySet(), onSelected = {},
-                                        dockSelected = setOf("com.google.android.apps.maps", "com.android.chrome", "com.spotify.music", "com.phonepe.app"),
-                                        onDockSelected = {},
-                                        profiles = setOf("Study", "Sleep"),
-                                        onToggleProfile = {}, onDeleteProfile = {},
-                                        gridWobbly = true, onGridWobbly = {},
-                                        activeProfile = "Study",
-                                        apps = apps,
-                                    )
-                                }
-                                Row(
-                                    horizontalArrangement = Arrangement.End,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Text(
-                                        "Cancel",
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        fontSize = 14.sp,
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-                                    )
-                                    Surface(
-                                        shape = RoundedCornerShape(6.dp),
-                                        color = Color(0xFFB08968).copy(alpha = 0.8f),
-                                    ) {
-                                        Text(
-                                            "Save",
-                                            color = Color.White,
-                                            fontSize = 14.sp,
-                                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 9.dp),
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                SettingsPage(
+                    key = "", onKey = {},
+                    profileName = "", onProfileName = {},
+                    selected = setOf("com.spotify.music"), onSelected = {},
+                    dockSelected = setOf("com.google.android.apps.maps", "com.android.chrome", "com.spotify.music", "com.phonepe.app"),
+                    onDockSelected = {},
+                    profiles = setOf("Study", "Sleep"),
+                    onToggleProfile = {}, onDeleteProfile = {},
+                    gridWobbly = true, onGridWobbly = {},
+                    activeProfile = "Study",
+                    apps = apps,
+                    onCancel = {}, onSave = {},
+                    switcherInitiallyOpen = switcherOpen,
+                    initialSection = section,
+                )
             }
         }
-        composeRule.waitForIdle()
-        composeRule.onRoot().captureRoboImage()
     }
 
     @Test
