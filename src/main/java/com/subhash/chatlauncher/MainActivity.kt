@@ -115,7 +115,13 @@ fun PaperGrid(modifier: Modifier = Modifier, wobbly: Boolean = false) {
     }
 }
 
-data class ChatMessage(val fromUser: Boolean, val text: String, val isHtml: Boolean = false, val choiceApps: List<AppEntry> = emptyList())
+data class ChatMessage(
+    val fromUser: Boolean,
+    val text: String,
+    val isHtml: Boolean = false,
+    val choiceApps: List<AppEntry> = emptyList(),
+    val onChoice: ((AppEntry) -> Unit)? = null,
+)
 
 data class AppEntry(
     val label: String,
@@ -267,7 +273,6 @@ fun ChatHome(
     var activeProfile by remember { mutableStateOf(router.activeProfile) }
     var showSettings by remember { mutableStateOf(false) }
     var dockPackages by remember { mutableStateOf(router.dockApps) }
-    var pendingDraft by remember { mutableStateOf<CommandRouter.Result.DraftMessage?>(null) }
     var gridWobbly by remember { mutableStateOf(router.gridWobbly) }
     val suggestions = remember(input, activeProfile) { if (input.isBlank()) emptyList() else resolveApps(input) } // resolveApps reads a cached list inside Activity
     // Home dock: user-configured apps (default Maps, Chrome, Spotify, PhonePe), focus-hidden apps stay hidden.
@@ -294,7 +299,6 @@ fun ChatHome(
             TextButton(onClick = {
                 messages = emptyList()
                 input = ""
-                pendingDraft = null
                 activeProfile = router.activeProfile
             }) { Text("Fresh chat", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 17.sp, fontFamily = roundedFont) }
             Spacer(Modifier.weight(1f))
@@ -345,16 +349,18 @@ fun ChatHome(
                     horizontalArrangement = if (msg.fromUser) Arrangement.End else Arrangement.Start,
                 ) {
                     Column {
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (msg.fromUser) MaterialTheme.colorScheme.primaryContainer
-                            else MaterialTheme.colorScheme.surfaceVariant,
-                        ) {
-                            if (msg.isHtml) {
-                                HtmlBubble(msg.text)
-                            } else {
+                        // Assistant replies are plain text on the paper; only the user's own lines get a bubble.
+                        if (msg.fromUser) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                            ) {
                                 Text(msg.text, modifier = Modifier.padding(10.dp))
                             }
+                        } else if (msg.isHtml) {
+                            HtmlBubble(msg.text)
+                        } else {
+                            Text(msg.text, fontFamily = roundedFont, modifier = Modifier.padding(vertical = 6.dp))
                         }
                         if (msg.choiceApps.isNotEmpty()) {
                             Row(modifier = Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -363,7 +369,7 @@ fun ChatHome(
                                         shape = RoundedCornerShape(16.dp),
                                         color = MaterialTheme.colorScheme.secondaryContainer,
                                         modifier = Modifier.clickable {
-                                            messages = messages + ChatMessage(false, router.execute(CommandRouter.Result.Launch(app)))
+                                            (msg.onChoice ?: { a -> launchApp(a) })(app)
                                         },
                                     ) {
                                         Text(app.displayLabel, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
@@ -377,22 +383,6 @@ fun ChatHome(
         }
         }
 
-        // App suggestions while typing
-        if (suggestions.isNotEmpty()) {
-            LazyRow(modifier = Modifier.padding(vertical = 4.dp)) {
-                items(suggestions) { app ->
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        modifier = Modifier
-                            .padding(end = 8.dp)
-                            .clickable { launchApp(app) },
-                    ) {
-                        Text(app.displayLabel, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
-                    }
-                }
-            }
-        }
 
         // Input: large inset composer card with inner send pill
         fun send() {
@@ -411,12 +401,27 @@ fun ChatHome(
                     )
                 }
             } else if (result is CommandRouter.Result.DraftMessage) {
-                pendingDraft = result
+                if (result.pkg != null) {
+                    // Explicit channel bypasses the question.
+                    messages = messages + ChatMessage(false, router.execute(result))
+                } else {
+                    val targets = shareTargets(result.text)
+                    messages = messages + ChatMessage(
+                        false,
+                        "Which app should I put that draft in? You'll pick the chat and send it there.",
+                        choiceApps = targets,
+                        onChoice = { app ->
+                            launchApp(app)
+                            messages = messages + ChatMessage(false, "Draft opened in ${app.displayLabel} for ${result.to} - pick the chat and tap send there.")
+                        },
+                    )
+                }
             } else if (result is CommandRouter.Result.ChooseApp) {
                 messages = messages + ChatMessage(
                     false,
                     "I see more than one '${result.label}' here - which one?",
                     choiceApps = result.apps,
+                    onChoice = { app -> messages = messages + ChatMessage(false, router.execute(CommandRouter.Result.Launch(app))) },
                 )
             } else {
                 if (result is CommandRouter.Result.Reply && result.text.startsWith("Focus profile '")) {
@@ -450,8 +455,25 @@ fun ChatHome(
                         }
                     },
                 )
-                Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                    Spacer(Modifier.weight(1f))
+                Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    // Suggestions sit inline left of Send, not above the composer.
+                    if (suggestions.isNotEmpty()) {
+                        LazyRow(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+                            items(suggestions) { app ->
+                                Surface(
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                    modifier = Modifier
+                                        .padding(end = 8.dp)
+                                        .clickable { launchApp(app) },
+                                ) {
+                                    Text(app.displayLabel, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                                }
+                            }
+                        }
+                    } else {
+                        Spacer(Modifier.weight(1f))
+                    }
                     Surface(
                         shape = RoundedCornerShape(6.dp),
                         color = Color(0xFFB08968).copy(alpha = 0.8f),
@@ -472,35 +494,6 @@ fun ChatHome(
     }
 
     // Focus-aware draft picker: hidden apps never appear, the user picks and confirms in the target app.
-    pendingDraft?.let { draft ->
-        val targets = remember(draft) { shareTargets(draft.text) }
-        AlertDialog(
-            onDismissRequest = { pendingDraft = null },
-            title = { Text("Choose app for draft") },
-            text = {
-                if (targets.isEmpty()) {
-                    Text("No app can take this draft (hidden apps stay hidden in focus mode).")
-                } else {
-                    LazyColumn {
-                        items(targets) { app ->
-                            Text(
-                                app.displayLabel,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        launchApp(app)
-                                        messages = messages + ChatMessage(false, "Draft opened in ${app.displayLabel} for ${draft.to} - confirm there to send.")
-                                        pendingDraft = null
-                                    }
-                                    .padding(vertical = 10.dp),
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { pendingDraft = null }) { Text("Cancel") } },
-        )
-    }
 
     if (showSettings) {
         SettingsDialog(
