@@ -51,10 +51,10 @@ class ContrastTest {
     }
 
     @Test
-    fun boldAccentMeetsLargeTextAaInBothThemes() {
-        // Selected states are bold text on the accent brown: 3:1 minimum for large/bold text.
-        for (scheme in schemes) {
-            assertTrue("accent vs background", ratio(accentBrown, scheme.background) >= 3.0)
-        }
+    fun accentTextMeetsAaInBothThemes() {
+        // Actionable accent text (selected tabs/options, Change/Edit/Use/New profile): full 4.5:1
+        // in both themes - darker brown on light, palette brown on dark.
+        assertTrue("accentTextLight vs white (${ratio(accentTextLight, Color.White)})", ratio(accentTextLight, Color.White) >= 4.5)
+        assertTrue("accentTextDark vs dark bg (${ratio(accentTextDark, Color(0xFF1B1917))})", ratio(accentTextDark, Color(0xFF1B1917)) >= 4.5)
     }
 }
