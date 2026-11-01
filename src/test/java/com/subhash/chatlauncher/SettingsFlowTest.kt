@@ -68,8 +68,6 @@ class SettingsFlowTest {
             }
         }
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Focus").performClick()
-        composeRule.waitForIdle()
     }
 
     @Test
