@@ -1,8 +1,9 @@
 package com.subhash.chatlauncher
 
 import android.content.Context
-import android.graphics.Typeface
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import java.io.File
 import java.util.zip.GZIPInputStream
 import android.util.Base64
@@ -20,7 +21,12 @@ object RoundedTypeface {
             val bytes = GZIPInputStream(Base64.decode(b64, Base64.DEFAULT).inputStream()).readBytes()
             val f = File(context.cacheDir, "nunito.ttf")
             if (!f.exists() || f.length() != bytes.size.toLong()) f.writeBytes(bytes)
-            FontFamily(Typeface.createFromFile(f)).also { cached = it }
+            // Load per weight so FontWeight.Bold actually renders bold; a single-typeface
+            // FontFamily would ignore weight requests.
+            FontFamily(
+                Font(f, FontWeight.Normal),
+                Font(f, FontWeight.Bold),
+            ).also { cached = it }
         } catch (e: Exception) {
             FontFamily.SansSerif
         }
