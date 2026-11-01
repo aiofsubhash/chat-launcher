@@ -67,6 +67,10 @@ class CommandRouter(
     fun hiddenNow(): Set<String> = activeProfile?.let { profileHidden(it) } ?: emptySet()
 
     companion object {
+        /** Work mode (a focus profile named "Work") sorts work-profile app entries first. */
+        fun prioritizeWork(apps: List<AppEntry>, workMode: Boolean): List<AppEntry> =
+            if (workMode) apps.sortedByDescending { it.isWork } else apps
+
         val DEFAULT_DOCK_APPS = listOf(
             "com.google.android.apps.maps",
             "com.android.chrome",
@@ -80,6 +84,8 @@ class CommandRouter(
         data class Launch(val app: AppEntry) : Result
         data class DraftMessage(val to: String, val text: String, val pkg: String? = null) : Result
         data class UberRide(val dropoff: String) : Result
+        /** Duplicate personal/work matches: never silently pick - the user chooses. */
+        data class ChooseApp(val apps: List<AppEntry>, val label: String) : Result
     }
 
     fun route(raw: String, suggestions: List<AppEntry>): Result {
@@ -127,15 +133,17 @@ class CommandRouter(
             return Result.UberRide(rideMatch.groupValues[1].trim().trim('"'))
         }
 
-        // App launch: exact match wins, single suggestion launches, otherwise chat
-        val exact = suggestions.firstOrNull { it.label.equals(input, true) || it.packageName.equals(input, true) }
-        if (exact != null) return Result.Launch(exact)
+        // App launch: a single exact match wins; duplicate personal/work entries always ask.
+        val exactMatches = suggestions.filter { it.label.equals(input, true) || it.packageName.equals(input, true) }
+        if (exactMatches.size > 1) return Result.ChooseApp(exactMatches, input)
+        if (exactMatches.size == 1) return Result.Launch(exactMatches.first())
         if (suggestions.size == 1) return Result.Launch(suggestions.first())
 
         return Result.Reply("")
     }
 
     fun execute(result: Result): String = when (result) {
+        is Result.ChooseApp -> "" // resolved inline by the conversation UI
         is Result.Launch -> try {
             activity.startActivity(result.app.launch)
             "Opening ${result.app.label}"
