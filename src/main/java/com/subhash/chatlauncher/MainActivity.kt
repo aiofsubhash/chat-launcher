@@ -115,9 +115,18 @@ fun PaperGrid(modifier: Modifier = Modifier, wobbly: Boolean = false) {
     }
 }
 
-data class ChatMessage(val fromUser: Boolean, val text: String, val isHtml: Boolean = false)
+data class ChatMessage(val fromUser: Boolean, val text: String, val isHtml: Boolean = false, val choiceApps: List<AppEntry> = emptyList())
 
-data class AppEntry(val label: String, val packageName: String, val launch: Intent)
+data class AppEntry(
+    val label: String,
+    val packageName: String,
+    val launch: Intent,
+    val isWork: Boolean = false,
+    val userHandle: android.os.UserHandle? = null,
+) {
+    /** Briefcase marker distinguishes duplicate work-profile entries in the text-first UI. */
+    val displayLabel: String get() = if (isWork) "\uD83D\uDCBC $label" else label
+}
 
 class MainActivity : ComponentActivity() {
 
@@ -149,7 +158,15 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     },
-                    launchApp = { app -> startActivity(app.launch) },
+                    launchApp = { app ->
+                        val handle = app.userHandle
+                        if (handle != null && handle != android.os.Process.myUserHandle()) {
+                            getSystemService(android.content.pm.LauncherApps::class.java)
+                                .startMainActivity(app.launch.component, handle, null, null)
+                        } else {
+                            startActivity(app.launch)
+                        }
+                    },
                 )
                 }
             }
@@ -174,8 +191,28 @@ class MainActivity : ComponentActivity() {
     }
 
     // Installed launchable apps are loaded once; focus filtering and search run on the cached list.
+    // Work-profile apps come from LauncherApps profiles and are marked with isWork; devices
+    // without a managed profile just return the personal set.
     private fun queryInstalledApps(): List<AppEntry> {
         val pm = packageManager
+        return try {
+            val la = getSystemService(android.content.pm.LauncherApps::class.java)
+            val me = android.os.Process.myUserHandle()
+            val entries = la.profiles.flatMap { handle ->
+                la.getActivityList(null, handle).mapNotNull { info ->
+                    val pkg = info.applicationInfo.packageName
+                    if (pkg == packageName) return@mapNotNull null
+                    val launch = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(info.componentName)
+                    AppEntry(info.label.toString(), pkg, launch, isWork = handle != me, userHandle = handle)
+                }
+            }
+            if (entries.isNotEmpty()) entries else queryInstalledAppsPm(pm)
+        } catch (e: Exception) {
+            queryInstalledAppsPm(pm)
+        }
+    }
+
+    private fun queryInstalledAppsPm(pm: android.content.pm.PackageManager): List<AppEntry> {
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         return pm.queryIntentActivities(intent, 0)
             .mapNotNull { ri ->
@@ -207,8 +244,9 @@ class MainActivity : ComponentActivity() {
                 val i = it.label.indexOf(query, ignoreCase = true)
                 if (i < 0) Int.MAX_VALUE else i
             }
-            .take(limit)
             .toList()
+            .let { CommandRouter.prioritizeWork(it, router.activeProfile.equals("work", ignoreCase = true)) }
+            .take(limit)
     }
 }
 
@@ -306,15 +344,32 @@ fun ChatHome(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                     horizontalArrangement = if (msg.fromUser) Arrangement.End else Arrangement.Start,
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = if (msg.fromUser) MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.surfaceVariant,
-                    ) {
-                        if (msg.isHtml) {
-                            HtmlBubble(msg.text)
-                        } else {
-                            Text(msg.text, modifier = Modifier.padding(10.dp))
+                    Column {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (msg.fromUser) MaterialTheme.colorScheme.primaryContainer
+                            else MaterialTheme.colorScheme.surfaceVariant,
+                        ) {
+                            if (msg.isHtml) {
+                                HtmlBubble(msg.text)
+                            } else {
+                                Text(msg.text, modifier = Modifier.padding(10.dp))
+                            }
+                        }
+                        if (msg.choiceApps.isNotEmpty()) {
+                            Row(modifier = Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                msg.choiceApps.forEach { app ->
+                                    Surface(
+                                        shape = RoundedCornerShape(16.dp),
+                                        color = MaterialTheme.colorScheme.secondaryContainer,
+                                        modifier = Modifier.clickable {
+                                            messages = messages + ChatMessage(false, router.execute(CommandRouter.Result.Launch(app)))
+                                        },
+                                    ) {
+                                        Text(app.displayLabel, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -333,7 +388,7 @@ fun ChatHome(
                             .padding(end = 8.dp)
                             .clickable { launchApp(app) },
                     ) {
-                        Text(app.label, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                        Text(app.displayLabel, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
                     }
                 }
             }
@@ -357,6 +412,12 @@ fun ChatHome(
                 }
             } else if (result is CommandRouter.Result.DraftMessage) {
                 pendingDraft = result
+            } else if (result is CommandRouter.Result.ChooseApp) {
+                messages = messages + ChatMessage(
+                    false,
+                    "I see more than one '${result.label}' here - which one?",
+                    choiceApps = result.apps,
+                )
             } else {
                 if (result is CommandRouter.Result.Reply && result.text.startsWith("Focus profile '")) {
                     activeProfile = router.activeProfile
@@ -423,12 +484,12 @@ fun ChatHome(
                     LazyColumn {
                         items(targets) { app ->
                             Text(
-                                app.label,
+                                app.displayLabel,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
                                         launchApp(app)
-                                        messages = messages + ChatMessage(false, "Draft opened in ${app.label} for ${draft.to} - confirm there to send.")
+                                        messages = messages + ChatMessage(false, "Draft opened in ${app.displayLabel} for ${draft.to} - confirm there to send.")
                                         pendingDraft = null
                                     }
                                     .padding(vertical = 10.dp),
@@ -1077,7 +1138,7 @@ fun StickyNote(app: AppEntry, fontFamily: androidx.compose.ui.text.font.FontFami
                 ),
             ) {
                 Text(
-                    app.label,
+                    app.displayLabel,
                     color = Color(0xFF5B5340),
                     fontSize = 15.sp,
                     fontFamily = fontFamily,
