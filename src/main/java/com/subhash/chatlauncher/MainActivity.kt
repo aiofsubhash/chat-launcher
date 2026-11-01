@@ -47,6 +47,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import kotlin.math.sin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -92,7 +93,7 @@ val darkCalmColors = darkColorScheme(
 )
 
 /** WCAG relative luminance and contrast ratio, shared with ContrastTest via the palette. */
-val sendButtonTextColor = Color(0xFF1F1509)
+val sendButtonTextColor = Color(0xFF080502)
 val accentBrown = Color(0xFFB08968)
 
 /** Faint irregular paper grid behind the chat, matching the calm reference style. */
@@ -400,7 +401,8 @@ fun ChatHome(
         if (messages.isEmpty()) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Row(
-                    modifier = Modifier.offset(y = 56.dp),
+                    // Scrollable so large font scales never clip note labels.
+                    modifier = Modifier.offset(y = 56.dp).horizontalScroll(androidx.compose.foundation.rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     val tilts = listOf(-2.5f, 1.5f, -1.5f, 2.5f)
@@ -432,18 +434,26 @@ fun ChatHome(
                             Text(msg.text, fontFamily = roundedFont, modifier = Modifier.padding(vertical = 6.dp))
                         }
                         if (msg.choiceApps.isNotEmpty()) {
-                            Row(modifier = Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // Stacked full-width choices: long labels stay readable, no squashed towers.
+                            Column(modifier = Modifier.padding(top = 8.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 msg.choiceApps.forEach { app ->
                                     Surface(
                                         shape = RoundedCornerShape(16.dp),
                                         color = MaterialTheme.colorScheme.secondaryContainer,
-                                        modifier = Modifier.clickable {
+                                        modifier = Modifier.fillMaxWidth().clickable {
                                             lastActivityAt = System.currentTimeMillis()
                                             (msg.onChoice ?: { a -> launchApp(a) })(app)
                                         },
                                     ) {
                                         val dup = msg.choiceApps.groupBy { it.label }.any { it.value.size > 1 }
-                                        Text(if (dup) app.choiceLabel else app.displayLabel, fontSize = 14.sp, modifier = Modifier.heightIn(min = 48.dp).wrapContentHeight().padding(horizontal = 12.dp))
+                                        // Same label AND same profile side (e.g. cloned apps): fall back to the package name so the choice stays unambiguous.
+                                        val sideClash = msg.choiceApps.count { it.choiceLabel == app.choiceLabel } > 1
+                                        val chip = when {
+                                            !dup -> app.displayLabel
+                                            sideClash -> "${app.choiceLabel} - ${app.packageName}"
+                                            else -> app.choiceLabel
+                                        }
+                                        Text(chip, fontSize = 14.sp, modifier = Modifier.heightIn(min = 48.dp).wrapContentHeight().padding(horizontal = 12.dp))
                                     }
                                 }
                             }
@@ -523,7 +533,8 @@ fun ChatHome(
                     value = input,
                     onValueChange = { input = it },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 88.dp),
-                    textStyle = TextStyle(color = MaterialTheme.colorScheme.onBackground, fontSize = 15.sp, fontFamily = roundedFont),
+                    textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp, fontFamily = roundedFont),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.onSurface),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { send() }),
                     decorationBox = { inner ->
