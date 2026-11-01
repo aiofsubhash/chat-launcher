@@ -232,6 +232,16 @@ class ChatHomeScreenshotTest {
         composeRule.onRoot().captureRoboImage()
     }
 
+    /** Open-ended message without an API key: assistant points to Settings > Account. */
+    @Test
+    fun chatNoKeyGuidance() {
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("what's a good birthday gift for my dad")
+        composeRule.onNodeWithText("Send").performClick()
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
     @Test
     fun draftPicker() {
         composeRule.waitForIdle()
