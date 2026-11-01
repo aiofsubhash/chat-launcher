@@ -169,11 +169,11 @@ class ChatHomeScreenshotTest {
                     selected = if (editing != null) setOf("com.spotify.music") else emptySet(), onSelected = {},
                     dockSelected = setOf("com.google.android.apps.maps", "com.android.chrome", "com.spotify.music", "com.phonepe.app"),
                     onDockSelected = {},
-                    profiles = setOf("Study", "Sleep"),
+                    profiles = setOf("Focus", "Sleep"),
                     onToggleProfile = {}, onDeleteProfile = {},
                     editingProfile = editing, onEditProfile = {},
                     gridWobbly = true, onGridWobbly = {},
-                    activeProfile = "Study",
+                    activeProfile = "Focus",
                     apps = apps,
                     onCancel = {}, onSave = {},
                     switcherInitiallyOpen = switcherOpen,
@@ -216,7 +216,7 @@ class ChatHomeScreenshotTest {
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
     fun settingsPageFocusEdit() {
-        settingsPageContent(section = "home", editing = "Study")
+        settingsPageContent(section = "home", editing = "Focus")
         composeRule.waitForIdle()
         composeRule.onRoot().captureRoboImage()
     }
