@@ -129,7 +129,7 @@ class CommandRouterTest {
         val work = AppEntry("Gmail", "com.google.android.gm", android.content.Intent(), isWork = true)
         val personal = AppEntry("Gmail", "com.google.android.gm", android.content.Intent(), isWork = false)
         assertEquals("com.google.android.gm", personal.identityKey)
-        assertEquals("com.google.android.gm@work", work.identityKey)
+        assertEquals("com.google.android.gm@work:unknown", work.identityKey) // null handle in unit tests
         // Focus profiles store identity keys, so hiding personal Gmail does not hide work Gmail.
         val r = router()
         r.saveProfile("Focus", setOf(personal.identityKey))
@@ -156,6 +156,27 @@ class CommandRouterTest {
         val msg = CommandRouter(activity, prefs).execute(CommandRouter.Result.UberRide("Kochi airport"))
         assert(msg.contains("as destination text")) { msg }
         assert(!msg.contains("filled in")) { msg }
+    }
+
+
+    @Test
+    fun legacyStudyProfileMigratesToFocus() {
+        val r = router()
+        r.saveProfile("Study", setOf("com.spotify.music"))
+        r.saveProfile("Gym", setOf("com.whatsapp"))
+        r.activeProfile = "Study"
+        r.migrateLegacyProfiles()
+        // Renamed with its hidden list and active selection intact; other profiles untouched.
+        assertEquals(setOf("Focus", "Gym"), r.profileNames())
+        assertEquals(setOf("com.spotify.music"), r.profileHidden("Focus"))
+        assertEquals("Focus", r.activeProfile)
+        // A user-created Focus profile is never overwritten by the legacy name.
+        val r2 = router()
+        r2.saveProfile("Study", setOf("com.spotify.music"))
+        r2.saveProfile("Focus", setOf("com.whatsapp"))
+        r2.migrateLegacyProfiles()
+        assertEquals(setOf("com.whatsapp"), r2.profileHidden("Focus"))
+        assertEquals(setOf("com.spotify.music"), r2.profileHidden("Study"))
     }
 
     @Test
