@@ -137,7 +137,7 @@ class MainActivity : ComponentActivity() {
                     allApps = { resolveApps("", limit = Int.MAX_VALUE) },
                     sendToLlm = { history ->
                         val key = router.apiKey
-                        if (key.isBlank()) null else LlmClient.chat(key, router.model.ifBlank { LlmClient.defaultModel(LlmClient.providerForKey(key)) }, history)
+                        if (key.isBlank()) null else LlmClient.chat(key, LlmClient.resolveModel(LlmClient.providerForKey(key), router.model, router.freeModelIds.ifEmpty { null }), history)
                     },
                     launchApp = { app -> startActivity(app.launch) },
                 )
@@ -480,10 +480,13 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApp
     var stagedHidden by remember { mutableStateOf(router.profileNames().associateWith { router.profileHidden(it) }) }
     var editingProfile by remember { mutableStateOf<String?>(null) }
     val apps = remember { allApps() }
+    val scope = rememberCoroutineScope()
+    var modelStatus by remember { mutableStateOf<String?>(null) }
 
     SettingsPage(
         key = key, onKey = { key = it },
-        model = model, onModel = { model = it },
+        model = model, onModel = { model = it; modelStatus = null },
+        modelStatus = modelStatus,
         profileName = profileName, onProfileName = { profileName = it },
         selected = selected, onSelected = { selected = it },
         dockSelected = dockSelected, onDockSelected = { dockSelected = it },
@@ -506,22 +509,44 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApp
         apps = apps,
         onCancel = onClose,
         onSave = {
-            router.apiKey = key.trim()
-            router.model = model.trim()
-            val finalHidden = stagedHidden.toMutableMap()
-            val editing = editingProfile
-            if (editing != null) {
-                finalHidden[editing] = selected
-            } else if (profileName.isNotBlank()) {
-                finalHidden[profileName.trim()] = selected
+            fun applyAll() {
+                val finalHidden = stagedHidden.toMutableMap()
+                val editing = editingProfile
+                if (editing != null) {
+                    finalHidden[editing] = selected
+                } else if (profileName.isNotBlank()) {
+                    finalHidden[profileName.trim()] = selected
+                }
+                (router.profileNames() - finalHidden.keys).forEach { router.deleteProfile(it) }
+                finalHidden.forEach { (n, h) -> router.saveProfile(n, h) }
+                val newActive = stagedActive?.takeIf { it in finalHidden.keys }
+                router.activeProfile = newActive
+                onActiveProfile(newActive)
+                onDockApps(apps.map { it.packageName }.filter { it in dockSelected })
+                onClose()
             }
-            (router.profileNames() - finalHidden.keys).forEach { router.deleteProfile(it) }
-            finalHidden.forEach { (n, h) -> router.saveProfile(n, h) }
-            val newActive = stagedActive?.takeIf { it in finalHidden.keys }
-            router.activeProfile = newActive
-            onActiveProfile(newActive)
-            onDockApps(apps.map { it.packageName }.filter { it in dockSelected })
-            onClose()
+            router.apiKey = key.trim()
+            val requestedModel = model.trim()
+            if (requestedModel.isNotEmpty() && LlmClient.providerForKey(key.trim()) == LlmClient.Provider.OPENROUTER) {
+                // Free-only scope: check the id against OpenRouter's live catalog; offline only :free ids pass.
+                scope.launch {
+                    val catalogIds = try { LlmClient.freeOpenRouterModels(LlmClient.fetchOpenRouterCatalog()) } catch (e: Exception) { null }
+                    if (catalogIds != null) router.freeModelIds = catalogIds
+                    if (LlmClient.isAllowedModel(LlmClient.Provider.OPENROUTER, requestedModel, catalogIds)) {
+                        router.model = requestedModel
+                        applyAll()
+                    } else {
+                        modelStatus = if (catalogIds != null) {
+                            "That model isn't listed as free on OpenRouter - pick a free one or leave it blank."
+                        } else {
+                            "Offline right now - only :free OpenRouter model ids can be saved."
+                        }
+                    }
+                }
+            } else {
+                router.model = requestedModel
+                applyAll()
+            }
         },
     )
 }
@@ -531,6 +556,7 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApp
 fun SettingsPage(
     key: String, onKey: (String) -> Unit,
     model: String = "", onModel: (String) -> Unit = {},
+    modelStatus: String? = null,
     profileName: String, onProfileName: (String) -> Unit,
     selected: Set<String>, onSelected: (Set<String>) -> Unit,
     dockSelected: Set<String>, onDockSelected: (Set<String>) -> Unit,
@@ -575,6 +601,7 @@ fun SettingsPage(
                 SettingsContent(
                     key = key, onKey = onKey,
                     model = model, onModel = onModel,
+                    modelStatus = modelStatus,
                     profileName = profileName, onProfileName = onProfileName,
                     selected = selected, onSelected = onSelected,
                     dockSelected = dockSelected, onDockSelected = onDockSelected,
@@ -599,6 +626,7 @@ fun SettingsPage(
 fun SettingsContent(
     key: String, onKey: (String) -> Unit,
     model: String = "", onModel: (String) -> Unit = {},
+    modelStatus: String? = null,
     profileName: String, onProfileName: (String) -> Unit,
     selected: Set<String>, onSelected: (Set<String>) -> Unit,
     dockSelected: Set<String>, onDockSelected: (Set<String>) -> Unit,
@@ -843,11 +871,19 @@ fun SettingsContent(
                         modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
                     )
                     Text(
-                        "Anthropic key: Claude by default. OpenRouter key (sk-or-...): free Nemotron by default - paste any OpenRouter model id to change it.",
+                        "Anthropic key: Claude by default. OpenRouter key (sk-or-...): free Nemotron by default - paste another free OpenRouter model id to change it. Only models free on OpenRouter are accepted.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 6.dp),
                     )
+                    if (modelStatus != null) {
+                        Text(
+                            modelStatus,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFB08968),
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                    }
                 }
             }
         }
@@ -906,7 +942,7 @@ fun ProfileSwitcherRow(
                     )
                 }
                 Text(
-                    "Create and edit profiles under Focus.",
+                    "Create and edit profiles in Focus profiles below.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 2.dp),
