@@ -75,6 +75,29 @@ object LlmClient {
 
     private const val SYSTEM_PROMPT = "You are the voice of a chat-first Android launcher. Be brief and plain. You cannot perform device actions yourself; the launcher app handles app launches and message drafts. When visual formatting genuinely helps, you may answer in simple HTML (no scripts)."
 
+    /**
+     * Chat with progressive delivery: onDelta receives each text chunk as it arrives (OpenRouter
+     * SSE). Anthropic and any non-streaming path deliver the full reply once via onDelta.
+     */
+    suspend fun chatStream(apiKey: String, model: String, history: List<Pair<String, String>>, onDelta: suspend (String) -> Unit): String =
+        withContext(Dispatchers.IO) {
+            when (providerForKey(apiKey)) {
+                Provider.OPENROUTER -> chatOpenRouterStream(apiKey, model, history, onDelta)
+                Provider.ANTHROPIC -> chatAnthropic(apiKey, model, history).also { onDelta(it) }
+            }
+        }
+
+    /** Parse one SSE line into a content delta, or null for keep-alives/[DONE]. */
+    fun parseSseDelta(line: String): String? {
+        if (!line.startsWith("data: ")) return null
+        val payload = line.removePrefix("data: ").trim()
+        if (payload == "[DONE]") return null
+        return try {
+            JSONObject(payload).getJSONArray("choices").getJSONObject(0)
+                .getJSONObject("delta").optString("content").takeIf { it.isNotEmpty() }
+        } catch (e: Exception) { null }
+    }
+
     suspend fun chat(apiKey: String, model: String, history: List<Pair<String, String>>): String =
         withContext(Dispatchers.IO) {
             when (providerForKey(apiKey)) {
@@ -95,6 +118,36 @@ object LlmClient {
             .put("messages", messages)
             .put("provider", JSONObject().put("max_price", JSONObject().put("prompt", "0").put("completion", "0")))
             .toString()
+    }
+
+    private suspend fun chatOpenRouterStream(apiKey: String, model: String, history: List<Pair<String, String>>, onDelta: suspend (String) -> Unit): String {
+        val body = JSONObject(openRouterBody(model, history)).put("stream", true).toString()
+        val conn = (URL("https://openrouter.ai/api/v1/chat/completions").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 15_000
+            readTimeout = 60_000
+            doOutput = true
+            setRequestProperty("content-type", "application/json")
+            setRequestProperty("Authorization", "Bearer $apiKey")
+        }
+        conn.outputStream.use { it.write(body.toByteArray()) }
+        val code = conn.responseCode
+        if (code !in 200..299) {
+            val err = conn.errorStream?.bufferedReader()?.readText() ?: ""
+            return "API error $code: ${err.take(200)}"
+        }
+        val sb = StringBuilder()
+        val reader = conn.inputStream.bufferedReader()
+        var line = reader.readLine()
+        while (line != null) {
+            val delta = parseSseDelta(line)
+            if (delta != null) {
+                sb.append(delta)
+                onDelta(delta)
+            }
+            line = reader.readLine()
+        }
+        return sb.toString()
     }
 
     private fun chatOpenRouter(apiKey: String, model: String, history: List<Pair<String, String>>): String {
