@@ -26,6 +26,8 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextClearance
@@ -118,16 +120,29 @@ class ChatHomeScreenshotTest {
         composeRule.onRoot().captureRoboImage()
     }
 
-    /** Focus subpage: profiles, new profile, hidden apps. */
+    /** Home tab with the new-profile editor intentionally opened. */
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
-    fun settingsPageFocus() {
-        settingsPageContent(section = "home")
+    fun settingsPageFocusEditor() {
+        settingsPageContent(section = "home", editorOpen = true)
         composeRule.waitForIdle()
         composeRule.onRoot().captureRoboImage()
     }
 
-    private fun settingsPageContent(switcherOpen: Boolean = false, section: String? = null, pickerOpen: Boolean = false, editing: String? = null) {
+    /** Small viewport + enlarged font, picker and editor open: last control reachable by scroll. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w320dp-h640dp-xxhdpi", fontScale = 1.3f)
+    fun settingsPageScrollReach() {
+        settingsPageContent(section = "home", pickerOpen = true, editorOpen = true)
+        composeRule.waitForIdle()
+        composeRule.onNode(hasSetTextAction()).performTextInput("Work")
+        composeRule.waitForIdle()
+        composeRule.onAllNodesWithText("Gmail")[1].performScrollTo()
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    private fun settingsPageContent(switcherOpen: Boolean = false, section: String? = null, pickerOpen: Boolean = false, editing: String? = null, editorOpen: Boolean = false) {
         val apps = listOf(
             AppEntry("WhatsApp", "com.whatsapp", Intent()),
             AppEntry("Chrome", "com.android.chrome", Intent()),
@@ -141,7 +156,7 @@ class ChatHomeScreenshotTest {
                 SettingsPage(
                     key = "", onKey = {},
                     profileName = "", onProfileName = {},
-                    selected = setOf("com.spotify.music"), onSelected = {},
+                    selected = if (editing != null) setOf("com.spotify.music") else emptySet(), onSelected = {},
                     dockSelected = setOf("com.google.android.apps.maps", "com.android.chrome", "com.spotify.music", "com.phonepe.app"),
                     onDockSelected = {},
                     profiles = setOf("Study", "Sleep"),
@@ -153,6 +168,7 @@ class ChatHomeScreenshotTest {
                     onCancel = {}, onSave = {},
                     switcherInitiallyOpen = switcherOpen,
                     pickerInitiallyOpen = pickerOpen,
+                    editorInitiallyOpen = editorOpen,
                     initialSection = section,
                 )
             }
