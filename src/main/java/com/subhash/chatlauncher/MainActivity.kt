@@ -477,67 +477,101 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApp
     var profiles by remember { mutableStateOf(router.profileNames()) }
     val apps = remember { allApps() }
 
-    val settingsContext = LocalContext.current
-    val settingsFont = remember { RoundedTypeface.load(settingsContext) }
-    AlertDialog(
-        onDismissRequest = onClose,
-        containerColor = Color.White,
-        title = { Text("Settings", fontFamily = settingsFont, fontSize = 20.sp, fontWeight = FontWeight.Medium) },
-        text = {
-            SettingsContent(
-                key = key, onKey = { key = it },
-                profileName = profileName, onProfileName = { profileName = it },
-                selected = selected, onSelected = { selected = it },
-                dockSelected = dockSelected, onDockSelected = { dockSelected = it },
-                profiles = profiles,
-                onToggleProfile = { p ->
-                    if (activeProfile == p) {
-                        router.activeProfile = null
-                        onActiveProfile(null)
-                    } else {
-                        router.activeProfile = p
-                        onActiveProfile(p)
-                    }
-                },
-                onDeleteProfile = { p ->
-                    router.deleteProfile(p)
-                    profiles = router.profileNames()
-                    if (activeProfile == p) onActiveProfile(null)
-                },
-                gridWobbly = gridWobbly, onGridWobbly = onGridWobbly,
-                activeProfile = activeProfile,
-                apps = apps,
-            )
-        },
-        confirmButton = {
-            Surface(
-                shape = RoundedCornerShape(6.dp),
-                color = Color(0xFFB08968).copy(alpha = 0.8f),
-                modifier = Modifier.clickable {
-                    router.apiKey = key.trim()
-                    if (profileName.isNotBlank()) {
-                        router.saveProfile(profileName.trim(), selected)
-                    }
-                    onDockApps(apps.map { it.packageName }.filter { it in dockSelected })
-                    onClose()
-                },
-            ) {
-                Text("Save", color = Color.White, fontSize = 14.sp, fontFamily = settingsFont, modifier = Modifier.padding(horizontal = 20.dp, vertical = 9.dp))
+    SettingsPage(
+        key = key, onKey = { key = it },
+        profileName = profileName, onProfileName = { profileName = it },
+        selected = selected, onSelected = { selected = it },
+        dockSelected = dockSelected, onDockSelected = { dockSelected = it },
+        profiles = profiles,
+        onToggleProfile = { p ->
+            if (p == null || activeProfile == p) {
+                router.activeProfile = null
+                onActiveProfile(null)
+            } else {
+                router.activeProfile = p
+                onActiveProfile(p)
             }
         },
-        dismissButton = {
-            Text(
-                "Cancel",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 14.sp,
-                fontFamily = settingsFont,
-                modifier = Modifier.clickable { onClose() }.padding(horizontal = 12.dp, vertical = 9.dp),
-            )
+        onDeleteProfile = { p ->
+            router.deleteProfile(p)
+            profiles = router.profileNames()
+            if (activeProfile == p) onActiveProfile(null)
+        },
+        gridWobbly = gridWobbly, onGridWobbly = onGridWobbly,
+        activeProfile = activeProfile,
+        apps = apps,
+        onCancel = onClose,
+        onSave = {
+            router.apiKey = key.trim()
+            if (profileName.isNotBlank()) {
+                router.saveProfile(profileName.trim(), selected)
+            }
+            onDockApps(apps.map { it.packageName }.filter { it in dockSelected })
+            onClose()
         },
     )
 }
 
-/** Settings panel content, extracted so previews and tests can render it outside the animated dialog. */
+/** Full-page settings surface: paper background, Cancel/Save top bar, profile switcher above sections. */
+@Composable
+fun SettingsPage(
+    key: String, onKey: (String) -> Unit,
+    profileName: String, onProfileName: (String) -> Unit,
+    selected: Set<String>, onSelected: (Set<String>) -> Unit,
+    dockSelected: Set<String>, onDockSelected: (Set<String>) -> Unit,
+    profiles: Set<String>,
+    onToggleProfile: (String?) -> Unit,
+    onDeleteProfile: (String) -> Unit,
+    gridWobbly: Boolean, onGridWobbly: (Boolean) -> Unit,
+    activeProfile: String?,
+    apps: List<AppEntry>,
+    onCancel: () -> Unit,
+    onSave: () -> Unit,
+    switcherInitiallyOpen: Boolean = false,
+    initialSection: String? = null,
+) {
+    val settingsContext = LocalContext.current
+    val settingsFont = remember { RoundedTypeface.load(settingsContext) }
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    "Cancel",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 15.sp,
+                    fontFamily = settingsFont,
+                    modifier = Modifier.clickable { onCancel() }.padding(horizontal = 4.dp, vertical = 8.dp),
+                )
+                Spacer(Modifier.weight(1f))
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = Color(0xFFB08968).copy(alpha = 0.8f),
+                    modifier = Modifier.clickable { onSave() },
+                ) {
+                    Text("Save", color = Color.White, fontSize = 14.sp, fontFamily = settingsFont, modifier = Modifier.padding(horizontal = 20.dp, vertical = 9.dp))
+                }
+            }
+            Text("Settings", style = MaterialTheme.typography.headlineSmall, fontFamily = settingsFont, modifier = Modifier.padding(top = 6.dp, bottom = 2.dp))
+            Box(modifier = Modifier.weight(1f, fill = false)) {
+                SettingsContent(
+                    key = key, onKey = onKey,
+                    profileName = profileName, onProfileName = onProfileName,
+                    selected = selected, onSelected = onSelected,
+                    dockSelected = dockSelected, onDockSelected = onDockSelected,
+                    profiles = profiles,
+                    onToggleProfile = onToggleProfile, onDeleteProfile = onDeleteProfile,
+                    gridWobbly = gridWobbly, onGridWobbly = onGridWobbly,
+                    activeProfile = activeProfile,
+                    apps = apps,
+                    switcherInitiallyOpen = switcherInitiallyOpen,
+                    initialSection = initialSection,
+                )
+            }
+        }
+    }
+}
+
+/** Settings page content: current-profile switcher above navigation into focused subpages. */
 @Composable
 fun SettingsContent(
     key: String, onKey: (String) -> Unit,
@@ -545,133 +579,285 @@ fun SettingsContent(
     selected: Set<String>, onSelected: (Set<String>) -> Unit,
     dockSelected: Set<String>, onDockSelected: (Set<String>) -> Unit,
     profiles: Set<String>,
-    onToggleProfile: (String) -> Unit,
+    onToggleProfile: (String?) -> Unit,
     onDeleteProfile: (String) -> Unit,
     gridWobbly: Boolean, onGridWobbly: (Boolean) -> Unit,
     activeProfile: String?,
     apps: List<AppEntry>,
-    expandAll: Boolean = false,
+    switcherInitiallyOpen: Boolean = false,
+    initialSection: String? = null,
 ) {
     val settingsContext = LocalContext.current
     val roundedFont = remember { RoundedTypeface.load(settingsContext) }
-    LazyColumn(modifier = Modifier.padding(vertical = 4.dp)) {
-        item {
-            SettingsSection(title = "Appearance", initiallyExpanded = true, expandAll = expandAll, roundedFont = roundedFont) {
-                Text(
-                    "Grid style",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Row(modifier = Modifier.padding(top = 2.dp)) {
-                    Text(
-                        "Straight",
-                        fontFamily = roundedFont,
-                        fontSize = 15.sp,
-                        fontWeight = if (!gridWobbly) FontWeight.Medium else FontWeight.Normal,
-                        color = if (!gridWobbly) Color(0xFFB08968) else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.clickable { onGridWobbly(false) }.padding(end = 20.dp, top = 4.dp, bottom = 4.dp),
-                    )
-                    Text(
-                        "Wobbly",
-                        fontFamily = roundedFont,
-                        fontSize = 15.sp,
-                        fontWeight = if (gridWobbly) FontWeight.Medium else FontWeight.Normal,
-                        color = if (gridWobbly) Color(0xFFB08968) else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.clickable { onGridWobbly(true) }.padding(top = 4.dp, bottom = 4.dp),
-                    )
-                }
-            }
+    var section by rememberSaveable { mutableStateOf(initialSection) }
+
+    if (section == null) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            ProfileSwitcherRow(
+                activeProfile = activeProfile,
+                profiles = profiles,
+                onToggleProfile = onToggleProfile,
+                roundedFont = roundedFont,
+                initiallyOpen = switcherInitiallyOpen,
+            )
+            NavRow("Home & customisation", roundedFont) { section = "home" }
+            NavRow("Focus", roundedFont) { section = "focus" }
+            NavRow("History", roundedFont) { section = "history" }
+            NavRow("Assistant & account", roundedFont, showDivider = false) { section = "assistant" }
         }
-        item {
-            SettingsSection(title = "Home apps", initiallyExpanded = true, expandAll = expandAll, roundedFont = roundedFont) {
+    } else {
+        LazyColumn(modifier = Modifier.fillMaxWidth()) {
+            item {
                 Text(
-                    "Up to 4 shown in the center of the home screen.",
-                    style = MaterialTheme.typography.bodySmall,
+                    "‹ Settings",
+                    fontFamily = roundedFont,
+                    fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.clickable { section = null }.padding(vertical = 8.dp),
                 )
-                apps.forEach { app ->
-                    PaperCheckbox(
-                        checked = app.packageName in dockSelected,
-                        onToggle = {
-                            onDockSelected(if (app.packageName in dockSelected) dockSelected - app.packageName
-                            else if (dockSelected.size < 4) dockSelected + app.packageName
-                            else dockSelected)
-                        },
-                        label = app.label,
-                        roundedFont = roundedFont,
-                    )
-                }
             }
-        }
-        item {
-            SettingsSection(title = "Focus profiles", initiallyExpanded = false, expandAll = expandAll, roundedFont = roundedFont) {
-                profiles.forEach { p ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                    ) {
-                        Text(p, modifier = Modifier.weight(1f), fontFamily = roundedFont, fontSize = 15.sp, color = MaterialTheme.colorScheme.onBackground)
+            when (section) {
+                "home" -> item {
+                    Text("Home & customisation", style = MaterialTheme.typography.titleMedium, fontFamily = roundedFont, modifier = Modifier.padding(bottom = 8.dp))
+                    Text(
+                        "Grid style",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(modifier = Modifier.padding(top = 2.dp)) {
                         Text(
-                            if (activeProfile == p) "Off" else "Use",
+                            "Straight",
+                            fontFamily = roundedFont,
+                            fontSize = 15.sp,
+                            fontWeight = if (!gridWobbly) FontWeight.Medium else FontWeight.Normal,
+                            color = if (!gridWobbly) Color(0xFFB08968) else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.clickable { onGridWobbly(false) }.padding(end = 20.dp, top = 4.dp, bottom = 4.dp),
+                        )
+                        Text(
+                            "Wobbly",
+                            fontFamily = roundedFont,
+                            fontSize = 15.sp,
+                            fontWeight = if (gridWobbly) FontWeight.Medium else FontWeight.Normal,
+                            color = if (gridWobbly) Color(0xFFB08968) else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.clickable { onGridWobbly(true) }.padding(top = 4.dp, bottom = 4.dp),
+                        )
+                    }
+                    var editingApps by rememberSaveable { mutableStateOf(false) }
+                    Text(
+                        "Home apps",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 14.dp),
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 2.dp)) {
+                        Text(
+                            apps.filter { it.packageName in dockSelected }.joinToString(", ") { it.label }.ifBlank { "None" },
+                            fontFamily = roundedFont,
+                            fontSize = 15.sp,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            if (editingApps) "Done" else "Change",
                             color = Color(0xFFB08968),
                             fontSize = 14.sp,
                             fontFamily = roundedFont,
-                            modifier = Modifier.clickable { onToggleProfile(p) }.padding(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier.clickable { editingApps = !editingApps }.padding(horizontal = 4.dp, vertical = 6.dp),
                         )
+                    }
+                    if (editingApps) {
                         Text(
-                            "Delete",
+                            "Up to 4 shown in the center of the home screen.",
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 14.sp,
-                            fontFamily = roundedFont,
-                            modifier = Modifier.clickable { onDeleteProfile(p) }.padding(horizontal = 4.dp, vertical = 6.dp),
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                        apps.forEach { app ->
+                            PaperCheckbox(
+                                checked = app.packageName in dockSelected,
+                                onToggle = {
+                                    onDockSelected(if (app.packageName in dockSelected) dockSelected - app.packageName
+                                    else if (dockSelected.size < 4) dockSelected + app.packageName
+                                    else dockSelected)
+                                },
+                                label = app.label,
+                                roundedFont = roundedFont,
+                            )
+                        }
+                    }
+                }
+                "focus" -> item {
+                    Text("Focus", style = MaterialTheme.typography.titleMedium, fontFamily = roundedFont, modifier = Modifier.padding(bottom = 8.dp))
+                    profiles.forEach { p ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        ) {
+                            Text(p, modifier = Modifier.weight(1f), fontFamily = roundedFont, fontSize = 15.sp, color = MaterialTheme.colorScheme.onBackground)
+                            Text(
+                                if (activeProfile == p) "Off" else "Use",
+                                color = Color(0xFFB08968),
+                                fontSize = 14.sp,
+                                fontFamily = roundedFont,
+                                modifier = Modifier.clickable { onToggleProfile(p) }.padding(horizontal = 10.dp, vertical = 6.dp),
+                            )
+                            Text(
+                                "Delete",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 14.sp,
+                                fontFamily = roundedFont,
+                                modifier = Modifier.clickable { onDeleteProfile(p) }.padding(horizontal = 4.dp, vertical = 6.dp),
+                            )
+                        }
+                    }
+                    OutlinedTextField(
+                        value = profileName,
+                        onValueChange = onProfileName,
+                        label = { Text("New profile name") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    )
+                    Text(
+                        "Apps hidden in this profile:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    apps.forEach { app ->
+                        PaperCheckbox(
+                            checked = app.packageName in selected,
+                            onToggle = {
+                                onSelected(if (app.packageName in selected) selected - app.packageName
+                                else selected + app.packageName)
+                            },
+                            label = app.label,
+                            roundedFont = roundedFont,
                         )
                     }
                 }
-                OutlinedTextField(
-                    value = profileName,
-                    onValueChange = onProfileName,
-                    label = { Text("New profile name") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(6.dp),
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                )
-                Text(
-                    "Apps hidden in this profile:",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-                apps.forEach { app ->
-                    PaperCheckbox(
-                        checked = app.packageName in selected,
-                        onToggle = {
-                            onSelected(if (app.packageName in selected) selected - app.packageName
-                            else selected + app.packageName)
-                        },
-                        label = app.label,
-                        roundedFont = roundedFont,
+                "history" -> item {
+                    Text("History", style = MaterialTheme.typography.titleMedium, fontFamily = roundedFont, modifier = Modifier.padding(bottom = 8.dp))
+                    Text(
+                        "Not built yet - every chat and ask will live here.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                "assistant" -> item {
+                    Text("Assistant & account", style = MaterialTheme.typography.titleMedium, fontFamily = roundedFont, modifier = Modifier.padding(bottom = 8.dp))
+                    OutlinedTextField(
+                        value = key,
+                        onValueChange = onKey,
+                        label = { Text("API key") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        "Stored only on this device. Needed for open-ended chat; launching and drafts work without it.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp),
                     )
                 }
             }
         }
-        item {
-            SettingsSection(title = "Assistant", initiallyExpanded = false, expandAll = expandAll, roundedFont = roundedFont, showDivider = false) {
-                OutlinedTextField(
-                    value = key,
-                    onValueChange = onKey,
-                    label = { Text("Anthropic API key") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(6.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                )
+    }
+}
+
+/** One navigation row on the Settings landing page. */
+@Composable
+fun NavRow(
+    title: String,
+    roundedFont: androidx.compose.ui.text.font.FontFamily?,
+    showDivider: Boolean = true,
+    onOpen: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().clickable { onOpen() }.padding(vertical = 12.dp),
+        ) {
+            Text(
+                title,
+                fontFamily = roundedFont,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                "›",
+                fontSize = 18.sp,
+                fontFamily = roundedFont,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (showDivider) WobblyDivider()
+    }
+}
+
+/** Current-profile switcher above the sections: tap to reveal profiles, the active one marked. */
+@Composable
+fun ProfileSwitcherRow(
+    activeProfile: String?,
+    profiles: Set<String>,
+    onToggleProfile: (String?) -> Unit,
+    roundedFont: androidx.compose.ui.text.font.FontFamily?,
+    initiallyOpen: Boolean = false,
+) {
+    var open by rememberSaveable { mutableStateOf(initiallyOpen) }
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().clickable { open = !open }.padding(vertical = 12.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    "Stored only on this device. Needed for open-ended chat; launching and drafts work without it.",
+                    "Current profile",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp),
+                )
+                Text(
+                    activeProfile ?: "Normal",
+                    fontFamily = roundedFont,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+            }
+            Text(
+                if (open) "−" else "+",
+                fontSize = 18.sp,
+                fontFamily = roundedFont,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (open) {
+            Column(modifier = Modifier.padding(start = 2.dp, bottom = 12.dp)) {
+                val options = listOf<String?>(null) + profiles.sorted()
+                options.forEach { p ->
+                    val label = p ?: "Normal"
+                    val isActive = p == activeProfile
+                    Text(
+                        (if (isActive) "✓ " else "") + label,
+                        fontFamily = roundedFont,
+                        fontSize = 15.sp,
+                        fontWeight = if (isActive) FontWeight.Medium else FontWeight.Normal,
+                        color = if (isActive) Color(0xFFB08968) else MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.fillMaxWidth().clickable { onToggleProfile(p) }.padding(vertical = 6.dp, horizontal = 4.dp),
+                    )
+                }
+                Text(
+                    "Create and edit profiles under Focus.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 2.dp),
                 )
             }
         }
+        WobblyDivider()
     }
 }
 
