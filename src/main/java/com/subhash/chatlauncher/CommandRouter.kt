@@ -63,26 +63,13 @@ class CommandRouter(
             .apply()
     }
 
+    /** Theme preference: "system", "light" or "dark". */
+    var themeMode: String
+        get() = prefs.getString("theme_mode", "system") ?: "system"
+        set(v) = prefs.edit().putString("theme_mode", v).apply()
+
     /** Packages hidden by the currently active focus profile (empty when off). */
     fun hiddenNow(): Set<String> = activeProfile?.let { profileHidden(it) } ?: emptySet()
-
-    /**
-     * One-time migration: a legacy default "Study" profile becomes "Focus", keeping its hidden
-     * list and active selection. Existing user-created profiles are never touched, and if the
-     * user already made a "Focus" profile the legacy one is left alone rather than merged.
-     */
-    fun migrateLegacyProfiles() {
-        val names = profileNames()
-        if ("Study" in names && "Focus" !in names) {
-            val hidden = profileHidden("Study")
-            prefs.edit()
-                .putStringSet("profile_names", names - "Study" + "Focus")
-                .putStringSet("profile_Focus", hidden)
-                .remove("profile_Study")
-                .apply()
-            if (activeProfile == "Study") activeProfile = "Focus"
-        }
-    }
 
     companion object {
         /** Work mode (a focus profile named "Work") sorts work-profile app entries first. */
