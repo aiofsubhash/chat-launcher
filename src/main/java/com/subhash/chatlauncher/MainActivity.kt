@@ -284,9 +284,17 @@ fun ChatHome(
 
     // Live clock for the top bar, refreshed every 30s.
     var now by remember { mutableStateOf(SimpleDateFormat("EEE, d MMM - HH:mm", Locale.getDefault()).format(Date())) }
+    var lastActivityAt by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
             now = SimpleDateFormat("EEE, d MMM - HH:mm", Locale.getDefault()).format(Date())
+            // 30 minutes idle starts a fresh chat - but never silently discards an unsent
+            // draft or an unanswered question from the assistant.
+            val idleFor = System.currentTimeMillis() - lastActivityAt
+            val pendingQuestion = messages.lastOrNull()?.choiceApps?.isNotEmpty() == true
+            if (idleFor > 30 * 60 * 1000 && messages.isNotEmpty() && input.isBlank() && !pendingQuestion) {
+                messages = emptyList()
+            }
             delay(30_000)
         }
     }
@@ -369,6 +377,7 @@ fun ChatHome(
                                         shape = RoundedCornerShape(16.dp),
                                         color = MaterialTheme.colorScheme.secondaryContainer,
                                         modifier = Modifier.clickable {
+                                            lastActivityAt = System.currentTimeMillis()
                                             (msg.onChoice ?: { a -> launchApp(a) })(app)
                                         },
                                     ) {
@@ -388,6 +397,7 @@ fun ChatHome(
         fun send() {
             val raw = input.trim()
             if (raw.isEmpty()) return
+            lastActivityAt = System.currentTimeMillis()
             input = ""
             messages = messages + ChatMessage(true, raw)
             val result = router.route(raw, suggestions)
