@@ -132,6 +132,12 @@ data class AppEntry(
 ) {
     /** Briefcase marker distinguishes duplicate work-profile entries in the text-first UI. */
     val displayLabel: String get() = if (isWork) "\uD83D\uDCBC $label" else label
+
+    /** Stable identity across personal/work duplicates of the same package. */
+    val identityKey: String get() = packageName + if (isWork) "@work" else ""
+
+    /** Unambiguous label for personal/work duplicate choices: both sides named. */
+    val choiceLabel: String get() = if (isWork) "\uD83D\uDCBC $label (work)" else "$label (personal)"
 }
 
 class MainActivity : ComponentActivity() {
@@ -165,12 +171,17 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     launchApp = { app ->
-                        val handle = app.userHandle
-                        if (handle != null && handle != android.os.Process.myUserHandle()) {
-                            getSystemService(android.content.pm.LauncherApps::class.java)
-                                .startMainActivity(app.launch.component, handle, null, null)
-                        } else {
-                            startActivity(app.launch)
+                        try {
+                            val handle = app.userHandle
+                            if (app.isWork && handle != null) {
+                                getSystemService(android.content.pm.LauncherApps::class.java)
+                                    .startMainActivity(app.launch.component, handle, null, null)
+                            } else {
+                                startActivity(app.launch)
+                            }
+                            true
+                        } catch (e: Exception) {
+                            false
                         }
                     },
                 )
@@ -184,16 +195,18 @@ class MainActivity : ComponentActivity() {
         val pm = packageManager
         val send = Intent(Intent.ACTION_SEND).setType("text/plain")
         val hidden = router.hiddenNow()
-        return pm.queryIntentActivities(send, 0).mapNotNull { ri ->
-            val pkg = ri.activityInfo.packageName
-            if (pkg == packageName || pkg in hidden) return@mapNotNull null
+        val resolved = pm.queryIntentActivities(send, 0).map { it.loadLabel(pm).toString() to it.activityInfo.packageName }
+        val chosen = CommandRouter.shareTargetsOf(resolved, packageName, hidden)
+        val byPkg = pm.queryIntentActivities(send, 0).associateBy { it.activityInfo.packageName }
+        return chosen.mapNotNull { (label, pkg) ->
+            val ri = byPkg[pkg] ?: return@mapNotNull null
             val launch = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
                 putExtra(Intent.EXTRA_TEXT, text)
                 setClassName(pkg, ri.activityInfo.name)
             }
-            AppEntry(ri.loadLabel(pm).toString(), pkg, launch)
-        }.sortedBy { it.label }
+            AppEntry(label, pkg, launch)
+        }
     }
 
     // Installed launchable apps are loaded once; focus filtering and search run on the cached list.
@@ -244,7 +257,7 @@ class MainActivity : ComponentActivity() {
         val hidden = router.hiddenNow()
         return installedApps()
             .asSequence()
-            .filter { it.packageName !in hidden }
+            .filter { it.identityKey !in hidden }
             .filter { query.isBlank() || it.label.contains(query, true) || it.packageName.contains(query, true) }
             .sortedBy {
                 val i = it.label.indexOf(query, ignoreCase = true)
@@ -263,7 +276,7 @@ fun ChatHome(
     shareTargets: (String) -> List<AppEntry>,
     allApps: () -> List<AppEntry>,
     sendToLlm: suspend (List<Pair<String, String>>) -> String?,
-    launchApp: (AppEntry) -> Unit,
+    launchApp: (AppEntry) -> Boolean,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -279,7 +292,7 @@ fun ChatHome(
     // Computed on each recomposition so package changes and dock edits show immediately.
     val allInstalled = allApps()
     val focusHidden = router.hiddenNow()
-    val dockApps = dockPackages.mapNotNull { pkg -> allInstalled.firstOrNull { it.packageName == pkg } }
+    val dockApps = dockPackages.mapNotNull { key -> allInstalled.firstOrNull { it.identityKey == key } }
         .filter { it.packageName !in focusHidden }
 
     // Live clock for the top bar, refreshed every 30s.
@@ -290,9 +303,13 @@ fun ChatHome(
             now = SimpleDateFormat("EEE, d MMM - HH:mm", Locale.getDefault()).format(Date())
             // 30 minutes idle starts a fresh chat - but never silently discards an unsent
             // draft or an unanswered question from the assistant.
-            val idleFor = System.currentTimeMillis() - lastActivityAt
-            val pendingQuestion = messages.lastOrNull()?.choiceApps?.isNotEmpty() == true
-            if (idleFor > 30 * 60 * 1000 && messages.isNotEmpty() && input.isBlank() && !pendingQuestion) {
+            if (CommandRouter.shouldResetChat(
+                    idleMillis = System.currentTimeMillis() - lastActivityAt,
+                    hasMessages = messages.isNotEmpty(),
+                    hasDraft = input.isNotBlank(),
+                    hasPendingQuestion = messages.lastOrNull()?.choiceApps?.isNotEmpty() == true,
+                )
+            ) {
                 messages = emptyList()
             }
             delay(30_000)
@@ -381,7 +398,8 @@ fun ChatHome(
                                             (msg.onChoice ?: { a -> launchApp(a) })(app)
                                         },
                                     ) {
-                                        Text(app.displayLabel, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+                                        val dup = msg.choiceApps.groupBy { it.label }.any { it.value.size > 1 }
+                                        Text(if (dup) app.choiceLabel else app.displayLabel, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
                                     }
                                 }
                             }
@@ -475,7 +493,11 @@ fun ChatHome(
                                     color = MaterialTheme.colorScheme.secondaryContainer,
                                     modifier = Modifier
                                         .padding(end = 8.dp)
-                                        .clickable { launchApp(app) },
+                                        .clickable {
+                                            if (!launchApp(app)) {
+                                                messages = messages + ChatMessage(false, CommandRouter.launchFailureMessage(app))
+                                            }
+                                        },
                                 ) {
                                     Text(app.displayLabel, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
                                 }
@@ -596,7 +618,7 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApp
                 val newActive = stagedActive?.takeIf { it in finalHidden.keys }
                 router.activeProfile = newActive
                 onActiveProfile(newActive)
-                onDockApps(apps.map { it.packageName }.filter { it in dockSelected })
+                onDockApps(apps.map { it.identityKey }.filter { it in dockSelected })
                 onClose()
             }
             router.apiKey = key.trim()
@@ -777,7 +799,7 @@ fun SettingsContent(
                     )
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
                         Text(
-                            apps.filter { it.packageName in dockSelected }.joinToString(", ") { it.label }.ifBlank { "None" },
+                            apps.filter { it.identityKey in dockSelected }.joinToString(", ") { it.displayLabel }.ifBlank { "None" },
                             fontFamily = roundedFont,
                             fontSize = 16.sp,
                             color = MaterialTheme.colorScheme.onBackground,
@@ -800,10 +822,10 @@ fun SettingsContent(
                         )
                         apps.forEach { app ->
                             PaperCheckbox(
-                                checked = app.packageName in dockSelected,
+                                checked = app.identityKey in dockSelected,
                                 onToggle = {
-                                    onDockSelected(if (app.packageName in dockSelected) dockSelected - app.packageName
-                                    else if (dockSelected.size < 4) dockSelected + app.packageName
+                                    onDockSelected(if (app.identityKey in dockSelected) dockSelected - app.identityKey
+                                    else if (dockSelected.size < 4) dockSelected + app.identityKey
                                     else dockSelected)
                                 },
                                 label = app.label,
@@ -884,12 +906,12 @@ fun SettingsContent(
                         )
                         apps.forEach { app ->
                             PaperCheckbox(
-                                checked = app.packageName in selected,
+                                checked = app.identityKey in selected,
                                 onToggle = {
-                                    onSelected(if (app.packageName in selected) selected - app.packageName
-                                    else selected + app.packageName)
+                                    onSelected(if (app.identityKey in selected) selected - app.identityKey
+                                    else selected + app.identityKey)
                                 },
-                                label = app.label,
+                                label = app.displayLabel,
                                 roundedFont = roundedFont,
                             )
                         }
