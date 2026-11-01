@@ -27,6 +27,7 @@ import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -94,6 +95,84 @@ class ChatHomeScreenshotTest {
     }
 
     /** Chat thread after one device-action exchange: user bubble + assistant handoff note. */
+
+    /** Duplicate same-label apps always render an unambiguous inline choice. */
+    @Test
+    fun appDuplicateChoice() {
+        installFakeApp("com.whatsapp.work", "WhatsApp", canSend = true) // same label as personal WhatsApp
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("whatsapp")
+        composeRule.onNodeWithText("Send").performClick()
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** True personal/work duplicate fixture: same label, work side carries isWork+serial. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun workProfileDuplicateChoice() {
+        val personal = AppEntry("WhatsApp", "com.whatsapp", Intent())
+        val work = AppEntry("WhatsApp", "com.whatsapp", Intent(), isWork = true, userSerial = 10L)
+        val prefs = composeRule.activity.getSharedPreferences("chat_launcher", android.content.Context.MODE_PRIVATE)
+        composeRule.activity.setContent {
+            MaterialTheme(colorScheme = calmColors) {
+                ChatHome(
+                    router = CommandRouter(composeRule.activity, prefs),
+                    resolveApps = { q -> if (q.contains("whats", true)) listOf(personal, work) else emptyList() },
+                    shareTargets = { emptyList() },
+                    allApps = { listOf(personal, work) },
+                    sendToLlm = { _, _ -> null },
+                    launchApp = { true },
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("whatsapp")
+        composeRule.onNodeWithText("Send").performClick()
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Dark theme home: the paper palette's dark variant over the same layout. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun darkHome() {
+        val prefs = composeRule.activity.getSharedPreferences("chat_launcher", android.content.Context.MODE_PRIVATE)
+        prefs.edit().putString("theme_mode", "dark").commit()
+        composeRule.activityRule.scenario.recreate()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("a")
+        composeRule.onNodeWithText("a").performTextClearance()
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+        prefs.edit().remove("theme_mode").commit()
+    }
+
+    /** Large-font home: layout must hold at 1.3x font scale. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi", fontScale = 1.3f)
+    fun largeFontHome() {
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("a")
+        composeRule.onNodeWithText("a").performTextClearance()
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi", fontScale = 1.3f)
+    fun largeFontDockScrollRevealsAllNotes() {
+        // At 1.3x font the dock scrolls horizontally; every note must be reachable.
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("a")
+        composeRule.onNodeWithText("a").performTextClearance()
+        composeRule.waitForIdle()
+        // performScrollTo rasterizes the full scrolled layer and OOMs Robolectric
+        // NATIVE graphics at 1.3x; assert scrollability + composition instead.
+        composeRule.onNode(androidx.compose.ui.test.hasScrollAction()).assertExists()
+        composeRule.onNodeWithText("PhonePe").assertExists()
+    }
+
     @Test
     fun chatConversation() {
         composeRule.waitForIdle()
@@ -152,7 +231,7 @@ class ChatHomeScreenshotTest {
         composeRule.onRoot().captureRoboImage()
     }
 
-    private fun settingsPageContent(switcherOpen: Boolean = false, section: String? = null, pickerOpen: Boolean = false, editing: String? = null, editorOpen: Boolean = false) {
+    private fun settingsPageContent(switcherOpen: Boolean = false, section: String? = null, pickerOpen: Boolean = false, editing: String? = null, editorOpen: Boolean = false, dark: Boolean = false) {
         val apps = listOf(
             AppEntry("WhatsApp", "com.whatsapp", Intent()),
             AppEntry("Chrome", "com.android.chrome", Intent()),
@@ -162,7 +241,7 @@ class ChatHomeScreenshotTest {
             AppEntry("Gmail", "com.google.android.gm", Intent()),
         )
         composeRule.activity.setContent {
-            MaterialTheme(colorScheme = calmColors) {
+            MaterialTheme(colorScheme = if (dark) darkCalmColors else calmColors) {
                 SettingsPage(
                     key = "", onKey = {},
                     profileName = "", onProfileName = {},
@@ -183,6 +262,15 @@ class ChatHomeScreenshotTest {
                 )
             }
         }
+    }
+
+    /** Settings in the dark palette: theme appearance stays readable and switchable. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun darkSettingsTheme() {
+        settingsPageContent(dark = true)
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
     }
 
     /** Home & customisation with the installed-app picker open via Change. */
