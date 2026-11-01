@@ -27,6 +27,43 @@ object LlmClient {
         Provider.OPENROUTER -> "nvidia/nemotron-3-ultra-550b-a55b:free"
     }
 
+    /** Zero-priced ids from OpenRouter's public catalog payload (GET /api/v1/models). */
+    fun freeOpenRouterModels(catalogJson: String): Set<String> {
+        val data = JSONObject(catalogJson).getJSONArray("data")
+        val out = mutableSetOf<String>()
+        for (i in 0 until data.length()) {
+            val m = data.getJSONObject(i)
+            val pricing = m.optJSONObject("pricing") ?: continue
+            if (pricing.optString("prompt") == "0" && pricing.optString("completion") == "0") {
+                out.add(m.getString("id"))
+            }
+        }
+        return out
+    }
+
+    suspend fun fetchOpenRouterCatalog(): String = withContext(Dispatchers.IO) {
+        val conn = (URL("https://openrouter.ai/api/v1/models").openConnection() as HttpURLConnection).apply {
+            connectTimeout = 10_000
+            readTimeout = 20_000
+        }
+        conn.inputStream.bufferedReader().readText()
+    }
+
+    /**
+     * Free-only gate. Anthropic keys use the account's own models. An OpenRouter id must be
+     * zero-priced in the live catalog when it is available; offline only OpenRouter's
+     * documented :free variants pass. There is no paid fallback.
+     */
+    fun isAllowedModel(provider: Provider, model: String, freeIds: Set<String>?): Boolean =
+        when (provider) {
+            Provider.ANTHROPIC -> true
+            Provider.OPENROUTER -> freeIds?.let { model in it } ?: model.endsWith(":free")
+        }
+
+    /** Model actually sent: the saved choice when it passes the free-only gate, else the provider default. */
+    fun resolveModel(provider: Provider, saved: String, freeIds: Set<String>?): String =
+        if (saved.isNotBlank() && isAllowedModel(provider, saved, freeIds)) saved else defaultModel(provider)
+
     private const val SYSTEM_PROMPT = "You are the voice of a chat-first Android launcher. Be brief and plain. You cannot perform device actions yourself; the launcher app handles app launches and message drafts. When visual formatting genuinely helps, you may answer in simple HTML (no scripts)."
 
     suspend fun chat(apiKey: String, model: String, history: List<Pair<String, String>>): String =
