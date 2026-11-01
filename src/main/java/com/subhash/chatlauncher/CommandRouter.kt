@@ -18,6 +18,11 @@ class CommandRouter(
         get() = prefs.getString("api_key", "") ?: ""
         set(v) = prefs.edit().putString("api_key", v).apply()
 
+    /** Explicit model override; blank = provider default (see LlmClient.defaultModel). */
+    var model: String
+        get() = prefs.getString("llm_model", "") ?: ""
+        set(v) = prefs.edit().putString("llm_model", v).apply()
+
     var activeProfile: String?
         get() = prefs.getString("active_profile", null)?.takeIf { it.isNotBlank() }
         set(v) = prefs.edit().putString("active_profile", v ?: "").apply()
