@@ -137,7 +137,17 @@ class MainActivity : ComponentActivity() {
                     allApps = { resolveApps("", limit = Int.MAX_VALUE) },
                     sendToLlm = { history ->
                         val key = router.apiKey
-                        if (key.isBlank()) null else LlmClient.chat(key, LlmClient.resolveModel(LlmClient.providerForKey(key), router.model, router.freeModelIds.ifEmpty { null }), history)
+                        if (key.isBlank()) {
+                            null
+                        } else {
+                            val provider = LlmClient.providerForKey(key)
+                            val gated = LlmClient.gatedModel(provider, router.model, router.freeModelIds.ifEmpty { null })
+                            if (gated == null) {
+                                "Your saved model '${router.model}' isn't verified as free on OpenRouter - re-save it in Settings > Account or clear it to use the free default."
+                            } else {
+                                LlmClient.chat(key, gated, history)
+                            }
+                        }
                     },
                     launchApp = { app -> startActivity(app.launch) },
                 )
@@ -532,14 +542,14 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApp
                 scope.launch {
                     val catalogIds = try { LlmClient.freeOpenRouterModels(LlmClient.fetchOpenRouterCatalog()) } catch (e: Exception) { null }
                     if (catalogIds != null) router.freeModelIds = catalogIds
-                    if (LlmClient.isAllowedModel(LlmClient.Provider.OPENROUTER, requestedModel, catalogIds)) {
+                    if (catalogIds != null && LlmClient.isAllowedModel(LlmClient.Provider.OPENROUTER, requestedModel, catalogIds)) {
                         router.model = requestedModel
                         applyAll()
                     } else {
                         modelStatus = if (catalogIds != null) {
                             "That model isn't listed as free on OpenRouter - pick a free one or leave it blank."
                         } else {
-                            "Offline right now - only :free OpenRouter model ids can be saved."
+                            "Couldn't verify pricing right now - nothing was saved. Try again when you're online."
                         }
                     }
                 }
@@ -871,7 +881,7 @@ fun SettingsContent(
                         modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
                     )
                     Text(
-                        "Anthropic key: Claude by default. OpenRouter key (sk-or-...): free Nemotron by default - paste another free OpenRouter model id to change it. Only models free on OpenRouter are accepted.",
+                        "Anthropic key: Claude by default. OpenRouter key (sk-or-...): free Nemotron by default - paste another model id to change it. Only models verified free on OpenRouter are accepted.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 6.dp),
