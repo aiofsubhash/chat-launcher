@@ -129,17 +129,19 @@ data class AppEntry(
     val launch: Intent,
     val isWork: Boolean = false,
     val userHandle: android.os.UserHandle? = null,
+    val userSerial: Long = -1,
 ) {
     /** Briefcase marker distinguishes duplicate work-profile entries in the text-first UI. */
     val displayLabel: String get() = if (isWork) "\uD83D\uDCBC $label" else label
 
     /**
-     * Stable identity across personal/work duplicates of the same package: the Android user id
-     * of the profile handle distinguishes multiple managed profiles. Multiple launcher activities
-     * within one package in one profile share an identity - the first match wins in the dock.
+     * Stable identity across personal/work duplicates of the same package: userSerial is the
+     * UserManager serial number of the profile (stable across process restarts), distinguishing
+     * multiple managed profiles. Multiple launcher activities within one package in one profile
+     * share an identity - the first match wins in the dock.
      */
     val identityKey: String get() =
-        if (isWork) packageName + "@work:" + (userHandle?.hashCode()?.toString() ?: "unknown")
+        if (isWork) packageName + "@work:" + (if (userSerial >= 0) userSerial.toString() else "unknown")
         else packageName
 
     /** Unambiguous label for personal/work duplicate choices: both sides named. */
@@ -154,7 +156,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val prefs = getSharedPreferences("chat_launcher", MODE_PRIVATE)
         router = CommandRouter(this, prefs)
-        router.migrateLegacyProfiles()
         setContent {
             MaterialTheme(colorScheme = calmColors) {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -229,7 +230,8 @@ class MainActivity : ComponentActivity() {
                     val pkg = info.applicationInfo.packageName
                     if (pkg == packageName) return@mapNotNull null
                     val launch = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setComponent(info.componentName)
-                    AppEntry(info.label.toString(), pkg, launch, isWork = handle != me, userHandle = handle)
+                    val serial = getSystemService(android.os.UserManager::class.java)?.getSerialNumberForUser(handle) ?: -1L
+                    AppEntry(info.label.toString(), pkg, launch, isWork = handle != me, userHandle = handle, userSerial = if (handle != me) serial else -1L)
                 }
             }
             if (entries.isNotEmpty()) entries else queryInstalledAppsPm(pm)
