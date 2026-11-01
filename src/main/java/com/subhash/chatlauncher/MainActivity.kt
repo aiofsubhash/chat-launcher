@@ -474,7 +474,10 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApp
     var profileName by remember { mutableStateOf("") }
     var selected by remember { mutableStateOf(setOf<String>()) }
     var dockSelected by remember { mutableStateOf(dockApps.toSet()) }
-    var profiles by remember { mutableStateOf(router.profileNames()) }
+    // Everything stages locally: Cancel discards all of it, Save applies it all at once.
+    var stagedActive by remember { mutableStateOf(activeProfile) }
+    var stagedHidden by remember { mutableStateOf(router.profileNames().associateWith { router.profileHidden(it) }) }
+    var editingProfile by remember { mutableStateOf<String?>(null) }
     val apps = remember { allApps() }
 
     SettingsPage(
@@ -482,30 +485,38 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApp
         profileName = profileName, onProfileName = { profileName = it },
         selected = selected, onSelected = { selected = it },
         dockSelected = dockSelected, onDockSelected = { dockSelected = it },
-        profiles = profiles,
+        profiles = stagedHidden.keys,
         onToggleProfile = { p ->
-            if (p == null || activeProfile == p) {
-                router.activeProfile = null
-                onActiveProfile(null)
-            } else {
-                router.activeProfile = p
-                onActiveProfile(p)
-            }
+            stagedActive = if (p == null || stagedActive == p) null else p
         },
         onDeleteProfile = { p ->
-            router.deleteProfile(p)
-            profiles = router.profileNames()
-            if (activeProfile == p) onActiveProfile(null)
+            stagedHidden = stagedHidden - p
+            if (stagedActive == p) stagedActive = null
+            if (editingProfile == p) { editingProfile = null; selected = emptySet() }
+        },
+        editingProfile = editingProfile,
+        onEditProfile = { p ->
+            editingProfile = p
+            selected = p?.let { stagedHidden[it] } ?: emptySet()
         },
         gridWobbly = gridWobbly, onGridWobbly = onGridWobbly,
-        activeProfile = activeProfile,
+        activeProfile = stagedActive,
         apps = apps,
         onCancel = onClose,
         onSave = {
             router.apiKey = key.trim()
-            if (profileName.isNotBlank()) {
-                router.saveProfile(profileName.trim(), selected)
+            val finalHidden = stagedHidden.toMutableMap()
+            val editing = editingProfile
+            if (editing != null) {
+                finalHidden[editing] = selected
+            } else if (profileName.isNotBlank()) {
+                finalHidden[profileName.trim()] = selected
             }
+            (router.profileNames() - finalHidden.keys).forEach { router.deleteProfile(it) }
+            finalHidden.forEach { (n, h) -> router.saveProfile(n, h) }
+            val newActive = stagedActive?.takeIf { it in finalHidden.keys }
+            router.activeProfile = newActive
+            onActiveProfile(newActive)
             onDockApps(apps.map { it.packageName }.filter { it in dockSelected })
             onClose()
         },
@@ -522,12 +533,15 @@ fun SettingsPage(
     profiles: Set<String>,
     onToggleProfile: (String?) -> Unit,
     onDeleteProfile: (String) -> Unit,
+    editingProfile: String?,
+    onEditProfile: (String?) -> Unit,
     gridWobbly: Boolean, onGridWobbly: (Boolean) -> Unit,
     activeProfile: String?,
     apps: List<AppEntry>,
     onCancel: () -> Unit,
     onSave: () -> Unit,
     switcherInitiallyOpen: Boolean = false,
+    pickerInitiallyOpen: Boolean = false,
     initialSection: String? = null,
 ) {
     val settingsContext = LocalContext.current
@@ -563,7 +577,9 @@ fun SettingsPage(
                     gridWobbly = gridWobbly, onGridWobbly = onGridWobbly,
                     activeProfile = activeProfile,
                     apps = apps,
+                    editingProfile = editingProfile, onEditProfile = onEditProfile,
                     switcherInitiallyOpen = switcherInitiallyOpen,
+                    pickerInitiallyOpen = pickerInitiallyOpen,
                     initialSection = initialSection,
                 )
             }
@@ -581,10 +597,13 @@ fun SettingsContent(
     profiles: Set<String>,
     onToggleProfile: (String?) -> Unit,
     onDeleteProfile: (String) -> Unit,
+    editingProfile: String?,
+    onEditProfile: (String?) -> Unit,
     gridWobbly: Boolean, onGridWobbly: (Boolean) -> Unit,
     activeProfile: String?,
     apps: List<AppEntry>,
     switcherInitiallyOpen: Boolean = false,
+    pickerInitiallyOpen: Boolean = false,
     initialSection: String? = null,
 ) {
     val settingsContext = LocalContext.current
@@ -642,7 +661,7 @@ fun SettingsContent(
                             modifier = Modifier.clickable { onGridWobbly(true) }.padding(top = 4.dp, bottom = 4.dp),
                         )
                     }
-                    var editingApps by rememberSaveable { mutableStateOf(false) }
+                    var editingApps by rememberSaveable { mutableStateOf(pickerInitiallyOpen) }
                     Text(
                         "Home apps",
                         style = MaterialTheme.typography.bodySmall,
@@ -688,6 +707,12 @@ fun SettingsContent(
                 }
                 "focus" -> item {
                     Text("Focus", style = MaterialTheme.typography.titleMedium, fontFamily = roundedFont, modifier = Modifier.padding(bottom = 8.dp))
+                    var confirmDelete by rememberSaveable { mutableStateOf<String?>(null) }
+                    Text(
+                        "Profiles",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     profiles.forEach { p ->
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -699,27 +724,53 @@ fun SettingsContent(
                                 color = Color(0xFFB08968),
                                 fontSize = 14.sp,
                                 fontFamily = roundedFont,
-                                modifier = Modifier.clickable { onToggleProfile(p) }.padding(horizontal = 10.dp, vertical = 6.dp),
+                                modifier = Modifier.clickable { confirmDelete = null; onToggleProfile(p) }.padding(horizontal = 10.dp, vertical = 6.dp),
                             )
                             Text(
-                                "Delete",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                "Edit",
+                                color = Color(0xFFB08968),
                                 fontSize = 14.sp,
                                 fontFamily = roundedFont,
-                                modifier = Modifier.clickable { onDeleteProfile(p) }.padding(horizontal = 4.dp, vertical = 6.dp),
+                                modifier = Modifier.clickable { confirmDelete = null; onEditProfile(p) }.padding(horizontal = 4.dp, vertical = 6.dp),
+                            )
+                            Text(
+                                if (confirmDelete == p) "Confirm delete" else "Delete",
+                                color = if (confirmDelete == p) Color(0xFFB08968) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 14.sp,
+                                fontFamily = roundedFont,
+                                modifier = Modifier.clickable {
+                                    if (confirmDelete == p) { confirmDelete = null; onDeleteProfile(p) }
+                                    else confirmDelete = p
+                                }.padding(horizontal = 4.dp, vertical = 6.dp),
                             )
                         }
                     }
-                    OutlinedTextField(
-                        value = profileName,
-                        onValueChange = onProfileName,
-                        label = { Text("New profile name") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(6.dp),
-                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                    )
                     Text(
-                        "Apps hidden in this profile:",
+                        if (editingProfile != null) "Editing \"$editingProfile\"" else "New profile",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                    if (editingProfile == null) {
+                        OutlinedTextField(
+                            value = profileName,
+                            onValueChange = onProfileName,
+                            label = { Text("New profile name") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        )
+                    } else {
+                        Text(
+                            "Cancel edit",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 14.sp,
+                            fontFamily = roundedFont,
+                            modifier = Modifier.clickable { onEditProfile(null) }.padding(top = 2.dp, bottom = 4.dp),
+                        )
+                    }
+                    Text(
+                        if (editingProfile != null) "Apps hidden in $editingProfile:" else "Apps hidden in the new profile:",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 8.dp),
