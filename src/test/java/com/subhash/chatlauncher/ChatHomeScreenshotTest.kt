@@ -25,6 +25,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performImeAction
@@ -134,7 +136,7 @@ class ChatHomeScreenshotTest {
         composeRule.onRoot().captureRoboImage()
     }
 
-    private fun settingsPageContent(switcherOpen: Boolean = false, section: String? = null) {
+    private fun settingsPageContent(switcherOpen: Boolean = false, section: String? = null, pickerOpen: Boolean = false, editing: String? = null) {
         val apps = listOf(
             AppEntry("WhatsApp", "com.whatsapp", Intent()),
             AppEntry("Chrome", "com.android.chrome", Intent()),
@@ -153,15 +155,64 @@ class ChatHomeScreenshotTest {
                     onDockSelected = {},
                     profiles = setOf("Study", "Sleep"),
                     onToggleProfile = {}, onDeleteProfile = {},
+                    editingProfile = editing, onEditProfile = {},
                     gridWobbly = true, onGridWobbly = {},
                     activeProfile = "Study",
                     apps = apps,
                     onCancel = {}, onSave = {},
                     switcherInitiallyOpen = switcherOpen,
+                    pickerInitiallyOpen = pickerOpen,
                     initialSection = section,
                 )
             }
         }
+    }
+
+    /** Home & customisation with the installed-app picker open via Change. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsPagePicker() {
+        settingsPageContent(section = "home", pickerOpen = true)
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** History subpage: truthfully labelled as not built yet. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsPageHistory() {
+        settingsPageContent(section = "history")
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Assistant & account subpage. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsPageAssistant() {
+        settingsPageContent(section = "assistant")
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Focus subpage while editing an existing profile's hidden apps. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsPageFocusEdit() {
+        settingsPageContent(section = "focus", editing = "Study")
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Delete asks for a second tap (Confirm delete) before removing a profile. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsPageFocusDeleteConfirm() {
+        settingsPageContent(section = "focus")
+        composeRule.waitForIdle()
+        composeRule.onAllNodesWithText("Delete")[0].performClick()
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
     }
 
     @Test
