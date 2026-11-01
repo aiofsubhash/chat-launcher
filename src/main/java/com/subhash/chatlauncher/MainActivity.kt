@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -47,6 +48,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import kotlin.math.sin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -70,10 +73,41 @@ val calmColors = lightColorScheme(
     surfaceContainerHigh = Color(0xFFF0F0EC),
 )
 
+// Dark variant of the paper palette: warm near-black paper, light ink, same muted accents.
+// Contrast targets: body text >= 4.5:1, large/bold accent text >= 3:1 (checked in ContrastTest).
+val darkCalmColors = darkColorScheme(
+    primary = Color(0xFF8FC5C1),
+    onPrimary = Color(0xFF122626),
+    primaryContainer = Color(0xFF2E4A48),
+    onPrimaryContainer = Color(0xFFD9EFED),
+    secondaryContainer = Color(0xFF33312C),
+    onSecondaryContainer = Color(0xFFDDDAD2),
+    surfaceVariant = Color(0xFF2A2823),
+    onSurfaceVariant = Color(0xFFB3AFA6),
+    background = Color(0xFF1B1917),
+    onBackground = Color(0xFFEAE7E0),
+    surface = Color(0xFF242220),
+    onSurface = Color(0xFFEAE7E0),
+    surfaceContainerLow = Color(0xFF201E1B),
+    surfaceContainer = Color(0xFF2A2823),
+    surfaceContainerHigh = Color(0xFF33312E),
+)
+
+/** WCAG relative luminance and contrast ratio, shared with ContrastTest via the palette. */
+val sendButtonTextColor = Color(0xFF080502)
+val accentBrown = Color(0xFFB08968)
+
+/** Accent for actionable TEXT: darker brown on light surfaces, palette brown on dark - both >=4.5:1. */
+val accentTextLight = Color(0xFF8A5A38)
+val accentTextDark = accentBrown
+val accentText: Color
+    @androidx.compose.runtime.Composable
+    get() = if (MaterialTheme.colorScheme.background.luminance() > 0.5f) accentTextLight else accentTextDark
+
 /** Faint irregular paper grid behind the chat, matching the calm reference style. */
 @Composable
 fun PaperGrid(modifier: Modifier = Modifier, wobbly: Boolean = false) {
-    val lineColor = Color(0xFF6B6B64).copy(alpha = 0.17f)
+    val lineColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.17f)
     Canvas(modifier = modifier) {
         val step = 46.dp.toPx()
         val amp = if (wobbly) 2.5.dp.toPx() else 0f
@@ -157,14 +191,22 @@ class MainActivity : ComponentActivity() {
         val prefs = getSharedPreferences("chat_launcher", MODE_PRIVATE)
         router = CommandRouter(this, prefs)
         setContent {
-            MaterialTheme(colorScheme = calmColors) {
+            var themeMode by remember { mutableStateOf(router.themeMode) }
+            val darkTheme = when (themeMode) {
+                "light" -> false
+                "dark" -> true
+                else -> isSystemInDarkTheme()
+            }
+            MaterialTheme(colorScheme = if (darkTheme) darkCalmColors else calmColors) {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 ChatHome(
                     router = router,
+                    themeMode = themeMode,
+                    onThemeMode = { themeMode = it; router.themeMode = it },
                     resolveApps = { query -> resolveApps(query) },
                     shareTargets = { text -> shareTargets(text) },
                     allApps = { resolveApps("", limit = Int.MAX_VALUE) },
-                    sendToLlm = { history ->
+                    sendToLlm = { history, onDelta ->
                         val key = router.apiKey
                         if (key.isBlank()) {
                             null
@@ -174,7 +216,7 @@ class MainActivity : ComponentActivity() {
                             if (gated == null) {
                                 "Your saved model '${router.model}' isn't verified as free on OpenRouter - re-save it in Settings > Account or clear it to use the free default."
                             } else {
-                                LlmClient.chat(key, gated, history)
+                                LlmClient.chatStream(key, gated, history, onDelta)
                             }
                         }
                     },
@@ -281,10 +323,12 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun ChatHome(
     router: CommandRouter,
+    themeMode: String = "system",
+    onThemeMode: (String) -> Unit = {},
     resolveApps: (String) -> List<AppEntry>,
     shareTargets: (String) -> List<AppEntry>,
     allApps: () -> List<AppEntry>,
-    sendToLlm: suspend (List<Pair<String, String>>) -> String?,
+    sendToLlm: suspend (List<Pair<String, String>>, suspend (String) -> Unit) -> String?,
     launchApp: (AppEntry) -> Boolean,
 ) {
     val scope = rememberCoroutineScope()
@@ -302,7 +346,7 @@ fun ChatHome(
     val allInstalled = allApps()
     val focusHidden = router.hiddenNow()
     val dockApps = dockPackages.mapNotNull { key -> allInstalled.firstOrNull { it.identityKey == key } }
-        .filter { it.packageName !in focusHidden }
+        .filter { it.identityKey !in focusHidden }
 
     // Live clock for the top bar, refreshed every 30s.
     var now by remember { mutableStateOf(SimpleDateFormat("EEE, d MMM - HH:mm", Locale.getDefault()).format(Date())) }
@@ -365,7 +409,8 @@ fun ChatHome(
         if (messages.isEmpty()) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Row(
-                    modifier = Modifier.offset(y = 56.dp),
+                    // Scrollable so large font scales never clip note labels.
+                    modifier = Modifier.offset(y = 56.dp).horizontalScroll(androidx.compose.foundation.rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     val tilts = listOf(-2.5f, 1.5f, -1.5f, 2.5f)
@@ -397,18 +442,26 @@ fun ChatHome(
                             Text(msg.text, fontFamily = roundedFont, modifier = Modifier.padding(vertical = 6.dp))
                         }
                         if (msg.choiceApps.isNotEmpty()) {
-                            Row(modifier = Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // Stacked full-width choices: long labels stay readable, no squashed towers.
+                            Column(modifier = Modifier.padding(top = 8.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 msg.choiceApps.forEach { app ->
                                     Surface(
                                         shape = RoundedCornerShape(16.dp),
                                         color = MaterialTheme.colorScheme.secondaryContainer,
-                                        modifier = Modifier.clickable {
+                                        modifier = Modifier.fillMaxWidth().clickable {
                                             lastActivityAt = System.currentTimeMillis()
                                             (msg.onChoice ?: { a -> launchApp(a) })(app)
                                         },
                                     ) {
                                         val dup = msg.choiceApps.groupBy { it.label }.any { it.value.size > 1 }
-                                        Text(if (dup) app.choiceLabel else app.displayLabel, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+                                        // Same label AND same profile side (e.g. cloned apps): fall back to the package name so the choice stays unambiguous.
+                                        val sideClash = msg.choiceApps.count { it.choiceLabel == app.choiceLabel } > 1
+                                        val chip = when {
+                                            !dup -> app.displayLabel
+                                            sideClash -> "${app.choiceLabel} - ${app.packageName}"
+                                            else -> app.choiceLabel
+                                        }
+                                        Text(chip, fontSize = 14.sp, modifier = Modifier.heightIn(min = 48.dp).wrapContentHeight().padding(horizontal = 12.dp))
                                     }
                                 }
                             }
@@ -430,8 +483,14 @@ fun ChatHome(
             val result = router.route(raw, suggestions)
             if (result is CommandRouter.Result.Reply && result.text.isEmpty()) {
                 scope.launch {
-                    val reply = sendToLlm(messages.map { (if (it.fromUser) "user" else "assistant") to it.text })
-                    messages = messages + ChatMessage(
+                    // Streamed reply: the assistant message grows in place as chunks arrive.
+                    messages = messages + ChatMessage(false, "")
+                    var acc = ""
+                    val reply = sendToLlm(messages.dropLast(1).map { (if (it.fromUser) "user" else "assistant") to it.text }) { delta ->
+                        acc += delta
+                        messages = messages.dropLast(1) + ChatMessage(false, acc)
+                    }
+                    messages = messages.dropLast(1) + ChatMessage(
                         false,
                         reply ?: "No API key yet - add one in Settings > Account, then I can actually chat.",
                         isHtml = reply?.contains(Regex("<[a-z]+[ >]")) == true,
@@ -473,7 +532,7 @@ fun ChatHome(
         }
         Surface(
             shape = RoundedCornerShape(16.dp),
-            color = Color.White,
+            color = MaterialTheme.colorScheme.surface,
             border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.22f)),
             modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
         ) {
@@ -482,7 +541,8 @@ fun ChatHome(
                     value = input,
                     onValueChange = { input = it },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 88.dp),
-                    textStyle = TextStyle(color = MaterialTheme.colorScheme.onBackground, fontSize = 15.sp, fontFamily = roundedFont),
+                    textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp, fontFamily = roundedFont),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.onSurface),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { send() }),
                     decorationBox = { inner ->
@@ -508,7 +568,7 @@ fun ChatHome(
                                             }
                                         },
                                 ) {
-                                    Text(app.displayLabel, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                                    Text(app.displayLabel, fontSize = 14.sp, modifier = Modifier.heightIn(min = 48.dp).wrapContentHeight().padding(horizontal = 12.dp))
                                 }
                             }
                         }
@@ -522,7 +582,7 @@ fun ChatHome(
                     ) {
                         Text(
                             "Send",
-                            color = Color.White,
+                            color = sendButtonTextColor,
                             fontSize = 14.sp,
                             fontFamily = roundedFont,
                             modifier = Modifier.padding(horizontal = 20.dp, vertical = 9.dp),
@@ -546,6 +606,8 @@ fun ChatHome(
             onGridWobbly = { gridWobbly = it; router.gridWobbly = it },
             activeProfile = activeProfile,
             onActiveProfile = { activeProfile = it },
+            themeMode = themeMode,
+            onThemeMode = onThemeMode,
             onClose = { showSettings = false },
         )
     }
@@ -574,7 +636,7 @@ fun HtmlBubble(html: String) {
 }
 
 @Composable
-fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApps: List<String>, onDockApps: (List<String>) -> Unit, gridWobbly: Boolean, onGridWobbly: (Boolean) -> Unit, activeProfile: String?, onActiveProfile: (String?) -> Unit, onClose: () -> Unit) {
+fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApps: List<String>, onDockApps: (List<String>) -> Unit, gridWobbly: Boolean, onGridWobbly: (Boolean) -> Unit, activeProfile: String?, onActiveProfile: (String?) -> Unit, themeMode: String = "system", onThemeMode: (String) -> Unit = {}, onClose: () -> Unit) {
     var key by remember { mutableStateOf(router.apiKey) }
     var model by remember { mutableStateOf(router.model) }
     var profileName by remember { mutableStateOf("") }
@@ -611,6 +673,7 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApp
         },
         gridWobbly = gridWobbly, onGridWobbly = onGridWobbly,
         activeProfile = stagedActive,
+        themeMode = themeMode, onThemeMode = onThemeMode,
         apps = apps,
         onCancel = onClose,
         onSave = {
@@ -672,6 +735,7 @@ fun SettingsPage(
     onEditProfile: (String?) -> Unit,
     gridWobbly: Boolean, onGridWobbly: (Boolean) -> Unit,
     activeProfile: String?,
+    themeMode: String = "system", onThemeMode: (String) -> Unit = {},
     apps: List<AppEntry>,
     onCancel: () -> Unit,
     onSave: () -> Unit,
@@ -698,7 +762,7 @@ fun SettingsPage(
                     color = Color(0xFFB08968).copy(alpha = 0.8f),
                     modifier = Modifier.clickable { onSave() },
                 ) {
-                    Text("Save", color = Color.White, fontSize = 14.sp, fontFamily = settingsFont, modifier = Modifier.padding(horizontal = 20.dp, vertical = 9.dp))
+                    Text("Save", color = sendButtonTextColor, fontSize = 14.sp, fontFamily = settingsFont, modifier = Modifier.padding(horizontal = 20.dp, vertical = 9.dp))
                 }
             }
             Text("Settings", style = MaterialTheme.typography.headlineSmall, fontFamily = settingsFont, modifier = Modifier.padding(top = 6.dp, bottom = 2.dp))
@@ -714,6 +778,7 @@ fun SettingsPage(
                     onToggleProfile = onToggleProfile, onDeleteProfile = onDeleteProfile,
                     gridWobbly = gridWobbly, onGridWobbly = onGridWobbly,
                     activeProfile = activeProfile,
+                    themeMode = themeMode, onThemeMode = onThemeMode,
                     apps = apps,
                     editingProfile = editingProfile, onEditProfile = onEditProfile,
                     switcherInitiallyOpen = switcherInitiallyOpen,
@@ -742,6 +807,7 @@ fun SettingsContent(
     onEditProfile: (String?) -> Unit,
     gridWobbly: Boolean, onGridWobbly: (Boolean) -> Unit,
     activeProfile: String?,
+    themeMode: String = "system", onThemeMode: (String) -> Unit = {},
     apps: List<AppEntry>,
     switcherInitiallyOpen: Boolean = false,
     pickerInitiallyOpen: Boolean = false,
@@ -766,8 +832,8 @@ fun SettingsContent(
                     label,
                     fontFamily = roundedFont,
                     fontSize = 17.sp,
-                    fontWeight = if (tab == id) FontWeight.Medium else FontWeight.Normal,
-                    color = if (tab == id) Color(0xFFB08968) else MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = if (tab == id) FontWeight.Bold else FontWeight.Normal,
+                    color = if (tab == id) accentText else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.clickable { tab = id }.padding(end = 22.dp, top = 6.dp, bottom = 10.dp),
                 )
             }
@@ -786,18 +852,37 @@ fun SettingsContent(
                             "Straight",
                             fontFamily = roundedFont,
                             fontSize = 16.sp,
-                            fontWeight = if (!gridWobbly) FontWeight.Medium else FontWeight.Normal,
-                            color = if (!gridWobbly) Color(0xFFB08968) else MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = if (!gridWobbly) FontWeight.Bold else FontWeight.Normal,
+                            color = if (!gridWobbly) accentText else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.clickable { onGridWobbly(false) }.padding(end = 26.dp, top = 6.dp, bottom = 6.dp),
                         )
                         Text(
                             "Wobbly",
                             fontFamily = roundedFont,
                             fontSize = 16.sp,
-                            fontWeight = if (gridWobbly) FontWeight.Medium else FontWeight.Normal,
-                            color = if (gridWobbly) Color(0xFFB08968) else MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = if (gridWobbly) FontWeight.Bold else FontWeight.Normal,
+                            color = if (gridWobbly) accentText else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.clickable { onGridWobbly(true) }.padding(top = 6.dp, bottom = 6.dp),
                         )
+                    }
+                    Text(
+                        "Theme",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 14.dp),
+                    )
+                    Row(modifier = Modifier.padding(top = 6.dp)) {
+                        listOf("system" to "System", "light" to "Light", "dark" to "Dark").forEach { (mode, label) ->
+                            Text(
+                                // Selected state is bold text, never color alone.
+                                label,
+                                fontFamily = roundedFont,
+                                fontSize = 16.sp,
+                                fontWeight = if (themeMode == mode) FontWeight.Bold else FontWeight.Normal,
+                                color = if (themeMode == mode) accentText else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.clickable { onThemeMode(mode) }.padding(end = 26.dp, top = 6.dp, bottom = 6.dp),
+                            )
+                        }
                     }
                     var editingApps by rememberSaveable { mutableStateOf(pickerInitiallyOpen) }
                     Text(
@@ -816,7 +901,7 @@ fun SettingsContent(
                         )
                         Text(
                             if (editingApps) "Done" else "Change",
-                            color = Color(0xFFB08968),
+                            color = accentText,
                             fontSize = 15.sp,
                             fontFamily = roundedFont,
                             modifier = Modifier.clickable { editingApps = !editingApps }.padding(horizontal = 4.dp, vertical = 8.dp),
@@ -857,21 +942,21 @@ fun SettingsContent(
                             Text(p, modifier = Modifier.weight(1f), fontFamily = roundedFont, fontSize = 16.sp, color = MaterialTheme.colorScheme.onBackground)
                             Text(
                                 if (activeProfile == p) "Off" else "Use",
-                                color = Color(0xFFB08968),
+                                color = accentText,
                                 fontSize = 15.sp,
                                 fontFamily = roundedFont,
                                 modifier = Modifier.clickable { confirmDelete = null; onToggleProfile(p) }.padding(horizontal = 12.dp, vertical = 8.dp),
                             )
                             Text(
                                 "Edit",
-                                color = Color(0xFFB08968),
+                                color = accentText,
                                 fontSize = 15.sp,
                                 fontFamily = roundedFont,
                                 modifier = Modifier.clickable { confirmDelete = null; onEditProfile(p) }.padding(horizontal = 6.dp, vertical = 8.dp),
                             )
                             Text(
                                 if (confirmDelete == p) "Confirm delete" else "Delete",
-                                color = if (confirmDelete == p) Color(0xFFB08968) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = if (confirmDelete == p) accentText else MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 15.sp,
                                 fontFamily = roundedFont,
                                 modifier = Modifier.clickable {
@@ -927,7 +1012,7 @@ fun SettingsContent(
                         if (editingProfile == null) {
                             Text(
                                 "Done",
-                                color = Color(0xFFB08968),
+                                color = accentText,
                                 fontSize = 15.sp,
                                 fontFamily = roundedFont,
                                 modifier = Modifier.clickable { editorOpen = false }.padding(top = 8.dp, bottom = 4.dp),
@@ -936,7 +1021,7 @@ fun SettingsContent(
                     } else {
                         Text(
                             "+ New profile",
-                            color = Color(0xFFB08968),
+                            color = accentText,
                             fontSize = 15.sp,
                             fontFamily = roundedFont,
                             modifier = Modifier.clickable { editorOpen = true }.padding(top = 14.dp, bottom = 6.dp),
@@ -985,7 +1070,7 @@ fun SettingsContent(
                         Text(
                             modelStatus,
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFFB08968),
+                            color = accentText,
                             modifier = Modifier.padding(top = 6.dp),
                         )
                     }
@@ -1043,8 +1128,8 @@ fun ProfileSwitcherRow(
                         fontFamily = roundedFont,
                         fontSize = 15.sp,
                         fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
-                        color = if (isActive) Color(0xFFB08968) else MaterialTheme.colorScheme.onBackground,
-                        modifier = Modifier.fillMaxWidth().clickable { onToggleProfile(p) }.padding(vertical = 6.dp, horizontal = 4.dp),
+                        color = if (isActive) accentText else MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { onToggleProfile(p) }.padding(vertical = 6.dp, horizontal = 4.dp),
                     )
                 }
                 Text(
