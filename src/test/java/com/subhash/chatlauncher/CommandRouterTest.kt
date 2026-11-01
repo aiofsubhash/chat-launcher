@@ -93,6 +93,83 @@ class CommandRouterTest {
         org.junit.Assert.assertEquals(true, CommandRouter.prioritizeWork(apps, true).first().isWork)
     }
 
+
+    @Test
+    fun explicitChannelSkipsQuestion() {
+        // "via whatsapp" resolves the channel, so no inline question is needed.
+        val r = router().route("send Nirmal via whatsapp running late", emptyList())
+        assert(r is CommandRouter.Result.DraftMessage && (r as CommandRouter.Result.DraftMessage).pkg == "com.whatsapp") { "expected explicit whatsapp channel, got $r" }
+    }
+
+    @Test
+    fun shareTargetsAreInstalledOnlyAndNotSelfOrHidden() {
+        val resolved = listOf(
+            "WhatsApp" to "com.whatsapp",
+            "Gmail" to "com.google.android.gm",
+            "Chat Launcher" to "com.subhash.chatlauncher",
+            "Slack" to "com.slack",
+        )
+        val chosen = CommandRouter.shareTargetsOf(resolved, "com.subhash.chatlauncher", setOf("com.slack"))
+        // Only genuinely installed/resolved apps appear; self and focus-hidden entries never do.
+        assertEquals(listOf("Gmail" to "com.google.android.gm", "WhatsApp" to "com.whatsapp"), chosen)
+    }
+
+    @Test
+    fun duplicateChoicesAreUnambiguouslyLabelled() {
+        val work = AppEntry("Gmail", "com.google.android.gm", android.content.Intent(), isWork = true)
+        val personal = AppEntry("Gmail", "com.google.android.gm", android.content.Intent(), isWork = false)
+        // Both sides of a personal/work duplicate name their profile - no bare "Gmail" vs "Gmail".
+        assertEquals("BRIEFCASE Gmail (work)".replace("BRIEFCASE", "\uD83D\uDCBC"), work.choiceLabel)
+        assertEquals("Gmail (personal)", personal.choiceLabel)
+        assert(work.choiceLabel != personal.choiceLabel)
+    }
+
+    @Test
+    fun personalAndWorkIdentityKeysPersistSeparately() {
+        val work = AppEntry("Gmail", "com.google.android.gm", android.content.Intent(), isWork = true)
+        val personal = AppEntry("Gmail", "com.google.android.gm", android.content.Intent(), isWork = false)
+        assertEquals("com.google.android.gm", personal.identityKey)
+        assertEquals("com.google.android.gm@work", work.identityKey)
+        // Focus profiles store identity keys, so hiding personal Gmail does not hide work Gmail.
+        val r = router()
+        r.saveProfile("Focus", setOf(personal.identityKey))
+        assertEquals(setOf("com.google.android.gm"), r.profileHidden("Focus"))
+        assert(work.identityKey !in r.profileHidden("Focus"))
+    }
+
+    @Test
+    fun workLaunchFailureNeverFallsBackToPersonal() {
+        val work = AppEntry("Gmail", "com.google.android.gm", android.content.Intent(), isWork = true)
+        val msg = CommandRouter.launchFailureMessage(work)
+        assert(msg.contains("work profile")) { msg }
+        assert(msg.contains("won't open the personal app")) { msg }
+        val personal = AppEntry("Gmail", "com.google.android.gm", android.content.Intent(), isWork = false)
+        assertEquals("Couldn't open Gmail", CommandRouter.launchFailureMessage(personal))
+    }
+
+    @Test
+    fun uberCopyClaimsDestinationTextOnly() {
+        // The handoff guarantees destination text was passed, not that Uber resolved a place.
+        val activity = Robolectric.buildActivity(MainActivity::class.java).get()
+        val prefs = activity.getSharedPreferences("test_prefs", Context.MODE_PRIVATE)
+        prefs.edit().clear().commit()
+        val msg = CommandRouter(activity, prefs).execute(CommandRouter.Result.UberRide("Kochi airport"))
+        assert(msg.contains("as destination text")) { msg }
+        assert(!msg.contains("filled in")) { msg }
+    }
+
+    @Test
+    fun sessionResetOnlyWhenIdleAndNothingPending() {
+        val thirtyOneMin = 31L * 60 * 1000
+        assert(CommandRouter.shouldResetChat(thirtyOneMin, hasMessages = true, hasDraft = false, hasPendingQuestion = false))
+        // Never discards an unsent draft or an unanswered question.
+        assert(!CommandRouter.shouldResetChat(thirtyOneMin, hasMessages = true, hasDraft = true, hasPendingQuestion = false))
+        assert(!CommandRouter.shouldResetChat(thirtyOneMin, hasMessages = true, hasDraft = false, hasPendingQuestion = true))
+        // Nothing to reset in an empty chat or before 30 minutes.
+        assert(!CommandRouter.shouldResetChat(thirtyOneMin, hasMessages = false, hasDraft = false, hasPendingQuestion = false))
+        assert(!CommandRouter.shouldResetChat(29L * 60 * 1000, hasMessages = true, hasDraft = false, hasPendingQuestion = false))
+    }
+
     @Test
     fun briefcaseMarksWorkEntries() {
         val work = AppEntry("Gmail", "com.google.android.gm", android.content.Intent(), isWork = true)
