@@ -242,12 +242,13 @@ class ChatHomeScreenshotTest {
         composeRule.onRoot().captureRoboImage()
     }
 
+    /** Draft without a channel: the assistant asks inline which app to use, no modal. */
     @Test
-    fun draftPicker() {
+    fun draftChannelQuestion() {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("write what you want to do").performTextInput("send this message to Avinash: hello, running late")
         composeRule.onNodeWithText("send this message to Avinash: hello, running late").performImeAction()
         composeRule.waitForIdle()
-        composeRule.onAllNodes(isRoot())[1].captureRoboImage()
+        composeRule.onRoot().captureRoboImage()
     }
 }
