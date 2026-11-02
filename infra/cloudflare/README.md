@@ -11,6 +11,14 @@ needs it. The app sends a per-tester pairing credential; the Worker fixes the fr
   `TESTER_TOKEN` (single shared tester secret).
 
 Contract: `POST /v1/chat/completions` with `Authorization: Bearer <credential>` or
-`X-Tester-Token: <credential>`; body `{ messages: [{role, content}], stream? }` (text only).
-`GET /health` is open. Bounds: 12 messages, 4000 chars/message, 12000 total, 1024 max
-tokens, 25s upstream timeout, 50 requests/day and 6/minute globally.
+`X-Tester-Token: <credential>` (or `Authorization: Bearer <credential>`); body
+`{ messages: [{role: "user", content}] }` with EXACTLY one user text message - no client
+system prompts, history, model or provider overrides.
+`GET /health` is open. The response contract is SSE-only: the proxy always streams
+(`stream: true` upstream); clients consume `text/event-stream`. Bounds: one message,
+4000 chars, 600 max tokens, 30s upstream lifetime timeout (covers the whole stream, not
+just headers), 50 requests/day and 6/minute globally, enforced by one atomic conditional
+UPDATE on a singleton D1 row.
+Free-only is enforced server-side: fixed `:free` model, `provider.max_price`
+{prompt: 0, completion: 0, request: 0, image: 0}, `allow_fallbacks: false`. There is no
+pinned provider list - routing must satisfy a zero price or the request fails.
