@@ -1993,9 +1993,6 @@ fun ReasoningInterventionDialog(
 /** Full app grid overlay (swipe left, Normal mode). */
 data class QueryShortcutTarget(val label: String, val urlPrefix: String, val iconRes: Int, val opensBlank: Boolean = false)
 
-// Verified prefill contracts (checked Nov 2026): chatgpt.com/?q= fills the composer without
-// sending (OpenAI community + Stack Overflow), claude.ai/new?q= prefills the prompt field
-// (Anthropic support docs), google.com/search?q= runs the search. Only Google executes on open.
 val queryShortcutTargets = listOf(
     // chatgpt.com/?q= AUTO-SENDS for logged-out web sessions (observed live 23:48) - rejected
     // by main 23:49. claude.ai/new?q= draft semantics are documented only for the desktop
