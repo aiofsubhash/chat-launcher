@@ -747,6 +747,19 @@ class ChatHomeScreenshotTest {
         composeRule.onNodeWithText("Noted - saved on this phone: buy milk").assertExists()
     }
 
+    /** Owner 22:53: render of the left-swipe app grid in Normal mode, alphabetical order. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun appGridOverlay() {
+        ApplicationProvider.getApplicationContext<android.content.Context>().getSharedPreferences("chat_launcher", 0).edit().remove("active_profile").commit()
+        composeRule.activityRule.scenario.recreate()
+        composeRule.waitForIdle()
+        composeRule.onRoot().performTouchInput { swipeLeft() }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("All apps").assertExists()
+        composeRule.onRoot().captureRoboImage()
+    }
+
     /** Owner 22:53: swipe left opens the full app grid in Normal mode. */
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
