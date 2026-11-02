@@ -2,7 +2,8 @@
 //
 // Security properties (enforced here, never trusted to the client):
 //   - Requires OPENROUTER_API_KEY (Worker secret). If missing, every AI call fails closed.
-//   - Model is fixed server-side; client-supplied model/provider/stream fields are ignored.
+//   - Model is fixed server-side; client-supplied model/provider fields are ignored.
+//   - Contract is SSE-only: the proxy always streams (stream:true upstream); clients read SSE.
 //   - Request body is read with a hard byte cap BEFORE JSON parsing.
 //   - Exactly one user message per call: no client system prompts, no conversation history.
 //   - The free-only gate pins provider routing and price caps server-side:
@@ -27,9 +28,11 @@ const UPSTREAM_TIMEOUT_MS_DEFAULT = 30000;
 const DAILY_CAP = 50;
 const MINUTE_CAP = 6;
 
+// No provider 'only' allow-list: any pinned list is an ungrounded provider selection.
+// The fixed :free model plus all-zero price caps and no fallbacks enforce free-only:
+// OpenRouter must route to an endpoint whose price is exactly 0 or the request fails.
 const FREE_ONLY_PROVIDER = {
-  only: ['novita', 'chutes', 'siliconflow', 'ncompass'],
-  max_price: { prompt: 0, completion: 0 },
+  max_price: { prompt: 0, completion: 0, request: 0, image: 0 },
   allow_fallbacks: false,
 };
 
@@ -186,9 +189,12 @@ async function handleRequest(request, env, ctx, now = new Date()) {
     }
 
     const { readable, writable } = new TransformStream();
+    // On upstream error/abort, pipeTo propagates the error to the writable side itself.
+    // Never call writable.abort() here - the stream is locked during pipeTo and the
+    // resulting rejection would be unhandled.
     const pump = upstream.body
       .pipeTo(writable)
-      .catch(() => { try { writable.abort(); } catch {} })
+      .catch(() => {})
       .finally(() => clearTimeout(timer));
     if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(pump);
 
@@ -202,6 +208,12 @@ async function handleRequest(request, env, ctx, now = new Date()) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    if (url.pathname === '/health' && request.method === 'GET') {
+      return new Response(JSON.stringify({ status: 'ok' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
     if (url.pathname !== '/v1/chat/completions') return errorResponse(404, 'not found');
     return handleRequest(request, env, ctx);
   },
