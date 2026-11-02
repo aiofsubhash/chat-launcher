@@ -761,11 +761,20 @@ fun ChatHome(
     // Extremely tight (small viewport with keyboard open): the date yields so the dock,
     // composer and Send stay reachable.
     val veryTightHeight = availableHeightDp < 400
+    // Critical (e.g. an already-resized window that still reports a large IME inset):
+    // nothing fits pinned, so the whole home scrolls - every control stays reachable.
+    val criticalHeight = availableHeightDp < 250
     // imePadding: respond to the IME window inset (keyboard) so the composer, Send,
-    // query chips and dock stay above it. With adjustResize the resized window already
-    // reports a zero IME bottom, so this is a no-op on the ordinary path and only pays
-    // out where the inset actually arrives (transient resize, non-resizing windows).
-    Column(modifier = Modifier.fillMaxSize().imePadding().padding(horizontal = 14.dp, vertical = 10.dp)) {
+    // query chips and dock stay above it. The inset contract is NOT uniform: stock
+    // adjustResize reports a zero IME bottom after the resize (making this a no-op),
+    // but some devices deliver a nonzero IME inset on an already-resized window. The
+    // collapse rules below key off usable height so that double-count case degrades to
+    // a compact - and at the extreme, scrollable - layout instead of clipping controls.
+    Column(
+        modifier = Modifier.fillMaxSize().imePadding()
+            .then(if (criticalHeight) Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()) else Modifier)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+    ) {
         // Top bar: Fresh chat left, settings right
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = {
@@ -820,9 +829,9 @@ fun ChatHome(
         // Date-to-notes gap is 8x the original 18dp per owner voice 21:54.
         DockRow(Modifier.fillMaxWidth().padding(top = if (veryTightHeight) 8.dp else if (tightHeight) 16.dp else 144.dp))
         if (messages.isEmpty()) {
-            Spacer(modifier = Modifier.weight(1f))
+            if (!criticalHeight) Spacer(modifier = Modifier.weight(1f))
         } else {
-            LazyColumn(modifier = Modifier.weight(1f).padding(top = 8.dp), reverseLayout = true) {
+            LazyColumn(modifier = (if (criticalHeight) Modifier.height(120.dp) else Modifier.weight(1f)).padding(top = 8.dp), reverseLayout = true) {
             items(messages.asReversed()) { msg ->
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
