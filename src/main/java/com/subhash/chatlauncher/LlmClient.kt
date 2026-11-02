@@ -256,9 +256,11 @@ object LlmClient {
 
     /** True only for https URLs on the pinned proxy host - a pairing response must not redirect credentials elsewhere. */
     fun isTrustedProxyEndpoint(url: String): Boolean = try {
+        // Fail closed: only the exact pinned chat-completions URL - no other path, query, fragment, port or userinfo.
         val u = java.net.URI(url.trim())
         u.scheme.equals("https", ignoreCase = true) && u.host != null &&
-            u.host.equals(TRUSTED_PROXY_HOST, ignoreCase = true) && u.userInfo == null
+            u.host.equals(TRUSTED_PROXY_HOST, ignoreCase = true) && u.userInfo == null &&
+            u.port == -1 && (u.path ?: "") == "/v1/chat/completions" && u.query == null && u.fragment == null
     } catch (e: Exception) { false }
 
     /** Maps a redeem HTTP exchange to a result. Never logs; the code is never included in any result. */
