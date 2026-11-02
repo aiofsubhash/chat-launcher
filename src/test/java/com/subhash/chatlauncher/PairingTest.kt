@@ -112,7 +112,7 @@ class PairingTest {
     fun pairIntentSavesCredentialAndIsConsumed() {
         LlmClient.redeemTransport = { _, _ -> 200 to """{"credential":"per-install-cred","endpoint":"${LlmClient.DEFAULT_CHAT_ENDPOINT}"}""" }
         ActivityScenario.launch<MainActivity>(pairIntent("chatlauncher://pair?code=one-use-code")).use { scenario ->
-            flushUntil { HistoryStore(prefs).all().any { e -> e.text.contains("AI connected - Ask AI is ready") } }
+            flushUntil { HistoryStore(prefs).all().any { e -> e.text.contains("This installation is paired") } }
             assertEquals("per-install-cred", prefs.getString("api_key", ""))
             assertEquals(LlmClient.DEFAULT_CHAT_ENDPOINT, prefs.getString("chat_endpoint", ""))
             scenario.onActivity { assertNull("pairing intent data is cleared after handling", it.intent?.data) }
