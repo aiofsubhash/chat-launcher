@@ -114,11 +114,14 @@ class SettingsFlowTest {
         openFocusSettings()
         composeRule.onAllNodesWithText("Edit")[3].performClick() // Study (Focus, Work, Sleep, Study)
         composeRule.onNodeWithText("Apps \"Study\" can open:").assertExists()
-        // Dispatch the semantics click action directly: inside the settings LazyColumn this
-        // row can report zero bounds under Robolectric's measurement, which makes the
-        // coordinate-based performClick() tap (0,0) instead of the row.
-        composeRule.onNodeWithTag("profile_app_com.whatsapp", useUnmergedTree = true)
-            .performSemanticsAction(SemanticsActions.OnClick) // add WhatsApp to Study's allowed apps
+        // Reachability proof, not just handler wiring: scroll the row into the visible
+        // viewport, require real on-screen pixels, then tap it with a real coordinate click.
+        composeRule.onNodeWithTag("profile_app_com.whatsapp").performScrollTo()
+        composeRule.waitForIdle()
+        val row = composeRule.onNodeWithTag("profile_app_com.whatsapp").fetchSemanticsNode()
+        assertTrue("editor row must have on-screen pixels (bounds were " + row.boundsInRoot + ")",
+            row.boundsInRoot.width > 0 && row.boundsInRoot.height > 0)
+        composeRule.onNodeWithTag("profile_app_com.whatsapp").performClick() // add WhatsApp to Study's allowed apps
         composeRule.onNodeWithText("Save").performClick()
         assertEquals(setOf("com.spotify.music", "com.whatsapp"), router.profileAllowed("Study"))
     }
