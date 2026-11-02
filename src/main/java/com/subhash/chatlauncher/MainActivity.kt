@@ -15,6 +15,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -708,8 +710,27 @@ fun ChatHome(
         }
     }
 
+    // Swipe gestures (owner 22:53): left swipe opens the full app grid (Normal mode only);
+    // right swipe opens the camera app when the active profile allows it.
+    var showAppGrid by remember { mutableStateOf(false) }
+    val swipeCameraApp = allInstalled.firstOrNull { it.packageName.contains("camera") }
+
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
     PaperGrid(Modifier.fillMaxSize(), wobbly = gridWobbly)
+    Box(modifier = Modifier.fillMaxSize().pointerInput(activeProfile, swipeCameraApp) {
+        var dragX = 0f
+        detectHorizontalDragGestures(
+            onDragEnd = {
+                when {
+                    dragX <= -80 && activeProfile == null -> showAppGrid = true
+                    dragX >= 80 && activeProfile != null -> Unit // camera is profile-gated
+                    dragX >= 80 -> swipeCameraApp?.let { launchApp(it) }
+                }
+                dragX = 0f
+            },
+            onHorizontalDrag = { _, dragAmount -> dragX += dragAmount },
+        )
+    })
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp)) {
         // Top bar: Fresh chat left, settings right
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -903,6 +924,16 @@ fun ChatHome(
             }
         }
     }
+    }
+
+    if (showAppGrid) {
+        // Normal mode only (gesture is gated); right swipe or a tap closes it.
+        AppGridOverlay(
+            apps = allInstalled,
+            fontFamily = roundedFont,
+            onLaunch = { app -> showAppGrid = false; launchApp(app) },
+            onDismiss = { showAppGrid = false },
+        )
     }
 
     if (showSettings) {
@@ -1915,6 +1946,40 @@ fun ReasoningInterventionDialog(
                                 .padding(horizontal = 12.dp, vertical = 10.dp)
                                 .testTag("reasoning_open_anyway"),
                         )
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+
+/** Full app grid overlay (swipe left, Normal mode). */
+@Composable
+fun AppGridOverlay(apps: List<AppEntry>, fontFamily: androidx.compose.ui.text.font.FontFamily?, onLaunch: (AppEntry) -> Unit, onDismiss: () -> Unit) {
+    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background.copy(alpha = 0.97f)).pointerInput(Unit) {
+        var dragX = 0f
+        detectHorizontalDragGestures(
+            onDragEnd = { if (dragX >= 80) onDismiss(); dragX = 0f },
+            onHorizontalDrag = { _, dragAmount -> dragX += dragAmount },
+        )
+    }) {
+        Column(modifier = Modifier.fillMaxSize().padding(18.dp)) {
+            Text("All apps", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 17.sp, fontFamily = fontFamily, modifier = Modifier.padding(bottom = 12.dp))
+            androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+                columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(4),
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                items(apps.size) { i ->
+                    val app = apps[i]
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.clickable { onLaunch(app) }.padding(6.dp),
+                    ) {
+                        StickyNote(app, fontFamily, tilt = 0f, onLaunch = { onLaunch(app) })
                     }
                 }
             }
