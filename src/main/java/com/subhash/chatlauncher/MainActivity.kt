@@ -40,8 +40,10 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -346,6 +348,7 @@ fun ChatHome(
     history: HistoryStore? = null,
     aiAvailable: () -> Boolean = { false },
     timerApp: AppEntry? = null,
+    userContextStore: UserContextStore? = null,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -358,6 +361,10 @@ fun ChatHome(
     var gridWobbly by remember { mutableStateOf(router.gridWobbly) }
     // Set when the draft's body is being asked for; the next line completes it.
     var pendingDraft by remember { mutableStateOf<Pair<String, String?>?>(null) }
+    // Reasoning profile: local-only onboarding context + launch intervention.
+    val userContext = userContextStore ?: remember { UserContextStore(context) }
+    var showReasoningOnboarding by remember { mutableStateOf(false) }
+    var reasoningIntervention by remember { mutableStateOf<AppEntry?>(null) }
     val suggestions = remember(input, activeProfile) { if (input.isBlank()) emptyList() else resolveApps(input) }
 
     // Dock: no profile = the user's chosen apps; a profile shows exactly its allow-list
@@ -524,7 +531,10 @@ fun ChatHome(
             dockApps.forEachIndexed { i, app ->
                 StickyNote(app, roundedFont, tilt = tilts[i % tilts.size], onLaunch = {
                     lastActivityAt = System.currentTimeMillis()
-                    if (!launchApp(app)) {
+                    if (activeProfile == CommandRouter.REASONING) {
+                        // Reasoning asks why first; "Just open it" always opens immediately.
+                        reasoningIntervention = app
+                    } else if (!launchApp(app)) {
                         addAssistant(if (app.packageName == CommandRouter.TIMER_KEY) "No clock app on this phone handles timers." else CommandRouter.launchFailureMessage(app))
                     }
                 })
@@ -569,15 +579,13 @@ fun ChatHome(
             modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
         )
 
+        // Notes hold one stable position under the date - visible in every state, no jump
+        // when the first message lands. The conversation lives in a bottom-only section
+        // that scrolls inside itself; it never takes over the screen.
+        DockRow(Modifier.fillMaxWidth().padding(top = 18.dp))
         if (messages.isEmpty()) {
-            // Empty home: notes centered (raised from the old lower position).
-            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                DockRow()
-            }
+            Spacer(modifier = Modifier.weight(1f))
         } else {
-            // Notes stay visible; the conversation lives in a bottom-only section that
-            // scrolls inside itself - the chat never takes over the screen.
-            DockRow(Modifier.fillMaxWidth().padding(top = 18.dp))
             LazyColumn(modifier = Modifier.weight(1f).padding(top = 8.dp), reverseLayout = true) {
             items(messages.asReversed()) { msg ->
                 Row(
@@ -718,11 +726,44 @@ fun ChatHome(
             gridWobbly = gridWobbly,
             onGridWobbly = { gridWobbly = it; router.gridWobbly = it },
             activeProfile = activeProfile,
-            onActiveProfile = { activeProfile = it },
+            onActiveProfile = { p ->
+                activeProfile = p
+                // Reasoning wants a short conversation before it turns on (first time only).
+                if (p == CommandRouter.REASONING && userContext.isEmpty()) showReasoningOnboarding = true
+            },
             themeMode = themeMode,
             onThemeMode = onThemeMode,
             historyEntries = { history?.all() ?: emptyList() },
+            contextEntries = userContext.entries(),
             onClose = { showSettings = false },
+        )
+    }
+
+    if (showReasoningOnboarding) {
+        ReasoningOnboardingDialog(
+            roundedFont = roundedFont,
+            wobbly = gridWobbly,
+            onDone = { qa ->
+                qa.forEach { (q, a) -> userContext.add(q, a) }
+                showReasoningOnboarding = false
+            },
+            onSkip = { showReasoningOnboarding = false },
+        )
+    }
+
+    reasoningIntervention?.let { app ->
+        ReasoningInterventionDialog(
+            app = app,
+            goal = userContext.goal(),
+            roundedFont = roundedFont,
+            wobbly = gridWobbly,
+            onOpen = {
+                reasoningIntervention = null
+                if (!launchApp(app)) {
+                    addAssistant(if (app.packageName == CommandRouter.TIMER_KEY) "No clock app on this phone handles timers." else CommandRouter.launchFailureMessage(app))
+                }
+            },
+            onLater = { reasoningIntervention = null },
         )
     }
 }
@@ -761,6 +802,7 @@ fun SettingsDialog(
     themeMode: String = "system",
     onThemeMode: (String) -> Unit = {},
     historyEntries: () -> List<HistoryEntry> = { emptyList() },
+    contextEntries: List<UserContextStore.Entry> = emptyList(),
     onClose: () -> Unit,
 ) {
     var key by remember { mutableStateOf(router.apiKey) }
@@ -806,6 +848,7 @@ fun SettingsDialog(
         themeMode = themeMode, onThemeMode = onThemeMode,
         apps = apps,
         historyEntries = historyEntries(),
+        contextEntries = contextEntries,
         onCancel = onClose,
         onSave = {
             fun applyAll() {
@@ -872,6 +915,7 @@ fun SettingsPage(
     themeMode: String = "system", onThemeMode: (String) -> Unit = {},
     apps: List<AppEntry>,
     historyEntries: List<HistoryEntry> = emptyList(),
+    contextEntries: List<UserContextStore.Entry> = emptyList(),
     onCancel: () -> Unit,
     onSave: () -> Unit,
     switcherInitiallyOpen: Boolean = false,
@@ -917,6 +961,7 @@ fun SettingsPage(
                     themeMode = themeMode, onThemeMode = onThemeMode,
                     apps = apps,
                     historyEntries = historyEntries,
+                    contextEntries = contextEntries,
                     editingProfile = editingProfile, onEditProfile = onEditProfile,
                     switcherInitiallyOpen = switcherInitiallyOpen,
                     pickerInitiallyOpen = pickerInitiallyOpen,
@@ -981,6 +1026,7 @@ fun SettingsContent(
     themeMode: String = "system", onThemeMode: (String) -> Unit = {},
     apps: List<AppEntry>,
     historyEntries: List<HistoryEntry> = emptyList(),
+    contextEntries: List<UserContextStore.Entry> = emptyList(),
     switcherInitiallyOpen: Boolean = false,
     pickerInitiallyOpen: Boolean = false,
     editorInitiallyOpen: Boolean = false,
@@ -1001,7 +1047,7 @@ fun SettingsContent(
             initiallyOpen = switcherInitiallyOpen,
         )
         Row(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
-            listOf("home" to "Home", "history" to "History", "account" to "Account").forEachIndexed { i, (id, label) ->
+            listOf("home" to "Home", "history" to "History", "context" to "Context", "account" to "Account").forEachIndexed { i, (id, label) ->
                 if (i > 0) Spacer(Modifier.width(6.dp))
                 OptionText(label, selected = tab == id, onClick = { tab = id }, font = roundedFont, fontSize = 17.sp)
             }
@@ -1133,6 +1179,13 @@ fun SettingsContent(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(top = 10.dp),
                             )
+                        } else if (editingProfile == CommandRouter.REASONING) {
+                            Text(
+                                "Add the entertainment apps you want a pause before - YouTube, Instagram, Reddit, TikTok, whatever they are for you. Opening one asks why first; \"Just open it\" always works.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 10.dp),
+                            )
                         } else if (editingProfile == CommandRouter.FOCUS) {
                             Text(
                                 "Timer (your clock app) is always available in Focus. Add more apps below only if you want them.",
@@ -1185,6 +1238,39 @@ fun SettingsContent(
                                 )
                                 Text(
                                     e.text,
+                                    fontFamily = roundedFont,
+                                    fontSize = 15.sp,
+                                    color = MaterialTheme.colorScheme.onBackground,
+                                    modifier = Modifier.padding(top = 2.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+                "context" -> item {
+                    Text("User context", style = MaterialTheme.typography.titleMedium, fontFamily = roundedFont, modifier = Modifier.padding(bottom = 10.dp))
+                    Text(
+                        "What the Reasoning profile learned from your onboarding chat. Read-only for now, stored only on this phone, never sent anywhere.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (contextEntries.isEmpty()) {
+                        Text(
+                            "Nothing yet - turn on the Reasoning profile and it will ask a few short questions first.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+                    } else {
+                        contextEntries.forEach { e ->
+                            Column(modifier = Modifier.padding(vertical = 8.dp)) {
+                                Text(
+                                    e.question,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    e.answer,
                                     fontFamily = roundedFont,
                                     fontSize = 15.sp,
                                     color = MaterialTheme.colorScheme.onBackground,
@@ -1394,6 +1480,147 @@ fun PaperCheckbox(
         }
         Spacer(modifier = Modifier.width(10.dp))
         Text(label, fontFamily = roundedFont, fontSize = 15.sp, color = MaterialTheme.colorScheme.onBackground)
+    }
+}
+
+/**
+ * Reasoning onboarding: a grid-background popup dialog (not a bottom sheet, not full
+ * screen) with a short local conversation before the profile turns on. Answers stay on
+ * this phone in the User context tab; nothing here ever goes to the cloud.
+ */
+@Composable
+fun ReasoningOnboardingDialog(
+    roundedFont: androidx.compose.ui.text.font.FontFamily?,
+    wobbly: Boolean,
+    onDone: (List<Pair<String, String>>) -> Unit,
+    onSkip: () -> Unit,
+) {
+    var step by remember { mutableStateOf(0) }
+    var answer by remember { mutableStateOf("") }
+    val qa = remember { mutableStateListOf<Pair<String, String>>() }
+    val questions = UserContextStore.QUESTIONS
+    Dialog(onDismissRequest = onSkip) {
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.background,
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .height((LocalConfiguration.current.screenHeightDp * 0.75f).dp),
+        ) {
+            Box {
+                PaperGrid(Modifier.fillMaxSize(), wobbly = wobbly)
+                Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
+                    Text("Before Reasoning turns on", style = MaterialTheme.typography.titleMedium, fontFamily = roundedFont)
+                    Text(
+                        "Let's talk first - a few short questions. Answers stay on this phone (Settings > Context).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                    Column(modifier = Modifier.weight(1f).padding(top = 14.dp)) {
+                        qa.forEach { (q, a) ->
+                            Text(q, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(a, fontFamily = roundedFont, fontSize = 15.sp, color = MaterialTheme.colorScheme.onBackground,
+                                modifier = Modifier.padding(top = 2.dp, bottom = 10.dp))
+                        }
+                        val q = questions[step]
+                        Text(q, fontFamily = roundedFont, fontSize = 17.sp, color = MaterialTheme.colorScheme.onBackground)
+                        OutlinedTextField(
+                            value = answer,
+                            onValueChange = { answer = it },
+                            label = { Text("Your answer") },
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                        )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            "Skip for now",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 15.sp,
+                            fontFamily = roundedFont,
+                            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onSkip() }.padding(horizontal = 10.dp, vertical = 10.dp),
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            if (step < questions.size - 1) "Next" else "Done",
+                            color = accentText,
+                            fontSize = 17.sp,
+                            fontFamily = roundedFont,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    if (answer.isNotBlank()) qa.add(questions[step] to answer.trim())
+                                    if (step < questions.size - 1) { step++; answer = "" } else onDone(qa.toList())
+                                }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Reasoning intervention: one short, personal pause before an entertainment app opens.
+ * Playful, not a gatekeeper - "Just open it" opens immediately, every time. No repeated
+ * interrogation, nothing leaves the phone.
+ */
+@Composable
+fun ReasoningInterventionDialog(
+    app: AppEntry,
+    goal: String?,
+    roundedFont: androidx.compose.ui.text.font.FontFamily?,
+    wobbly: Boolean,
+    onOpen: () -> Unit,
+    onLater: () -> Unit,
+) {
+    Dialog(onDismissRequest = onLater) {
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = MaterialTheme.colorScheme.background,
+            modifier = Modifier.fillMaxWidth(0.92f).wrapContentHeight(),
+        ) {
+            Box {
+                PaperGrid(Modifier.fillMaxSize(), wobbly = wobbly)
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text("Before ${app.displayLabel}…", style = MaterialTheme.typography.titleMedium, fontFamily = roundedFont)
+                    Text(
+                        if (goal != null) "You said you want more time for $goal. Quick check: what's this for, and how long? You can do better."
+                        else "Quick check: what's this for, and how long? You can do better.",
+                        fontFamily = roundedFont,
+                        fontSize = 16.sp,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().padding(top = 18.dp),
+                    ) {
+                        Text(
+                            "Maybe later",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 15.sp,
+                            fontFamily = roundedFont,
+                            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onLater() }.padding(horizontal = 10.dp, vertical = 10.dp),
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            "Just open it",
+                            color = accentText,
+                            fontSize = 17.sp,
+                            fontFamily = roundedFont,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onOpen() }
+                                .padding(horizontal = 12.dp, vertical = 10.dp)
+                                .testTag("reasoning_open_anyway"),
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
