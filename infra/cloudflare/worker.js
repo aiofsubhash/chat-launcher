@@ -80,7 +80,11 @@ async function readBoundedBody(request, limit) {
 }
 
 function extractUserText(body) {
-  const messages = body && body.messages;
+  let messages = body && body.messages;
+  // v0.4 shipped one fixed public client scaffold. Drop only this exact prefix;
+  // never accept arbitrary system text, history, or more than one user message.
+  const legacyScaffold = 'You are the voice of a chat-first Android launcher. Be brief and plain. You cannot perform device actions yourself; the launcher app handles app launches and message drafts. When visual formatting genuinely helps, you may answer in simple HTML (no scripts).';
+  if (Array.isArray(messages) && messages.length === 2 && messages[0]?.role === 'system' && messages[0]?.content === legacyScaffold) messages = [messages[1]];
   if (!Array.isArray(messages) || messages.length !== 1) {
     throw new HttpError(400, 'expected exactly one message');
   }
