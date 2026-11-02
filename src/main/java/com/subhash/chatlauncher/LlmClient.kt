@@ -79,13 +79,52 @@ object LlmClient {
      * Chat with progressive delivery: onDelta receives each text chunk as it arrives (OpenRouter
      * SSE). Anthropic and any non-streaming path deliver the full reply once via onDelta.
      */
-    suspend fun chatStream(apiKey: String, model: String, history: List<Pair<String, String>>, onDelta: suspend (String) -> Unit): String =
+    /**
+     * Chat with progressive delivery. endpointUrl (Connect AI): POST the OpenAI-compatible
+     * body to that full URL with the credential as bearer - the server holds the upstream
+     * key and fixes the model. Blank endpoint = the key's own provider, as before.
+     */
+    suspend fun chatStream(apiKey: String, model: String, history: List<Pair<String, String>>, endpointUrl: String = "", onDelta: suspend (String) -> Unit): String =
         withContext(Dispatchers.IO) {
+            if (endpointUrl.isNotBlank()) {
+                return@withContext chatProxyStream(endpointUrl.trim(), apiKey, model, history, onDelta)
+            }
             when (providerForKey(apiKey)) {
                 Provider.OPENROUTER -> chatOpenRouterStream(apiKey, model, history, onDelta)
                 Provider.ANTHROPIC -> chatAnthropic(apiKey, model, history).also { onDelta(it) }
             }
         }
+
+    /** Connect AI proxy: same OpenAI-compatible shape, server-fixed free model upstream. */
+    private suspend fun chatProxyStream(endpointUrl: String, credential: String, model: String, history: List<Pair<String, String>>, onDelta: suspend (String) -> Unit): String {
+        val body = JSONObject(openRouterBody(model, history)).put("stream", true).toString()
+        val conn = (URL(endpointUrl).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 15_000
+            readTimeout = 60_000
+            doOutput = true
+            setRequestProperty("content-type", "application/json")
+            setRequestProperty("Authorization", "Bearer $credential")
+        }
+        conn.outputStream.use { it.write(body.toByteArray()) }
+        val code = conn.responseCode
+        if (code !in 200..299) {
+            val err = conn.errorStream?.bufferedReader()?.readText() ?: ""
+            return "API error $code: ${err.take(200)}"
+        }
+        val sb = StringBuilder()
+        val reader = conn.inputStream.bufferedReader()
+        var line = reader.readLine()
+        while (line != null) {
+            val delta = parseSseDelta(line)
+            if (delta != null) {
+                sb.append(delta)
+                onDelta(delta)
+            }
+            line = reader.readLine()
+        }
+        return sb.toString()
+    }
 
     /** Parse one SSE line into a content delta, or null for keep-alives/[DONE]. */
     fun parseSseDelta(line: String): String? {
