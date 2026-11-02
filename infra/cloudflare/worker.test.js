@@ -24,7 +24,7 @@ INSERT OR IGNORE INTO quota_singleton (id) VALUES (1);`;
 function makeD1() {
   const db = new DatabaseSync(':memory:');
   db.exec(SCHEMA);
-  db.exec(new TextDecoder().decode(readFileSync(new URL('./schema-v4.sql',import.meta.url))));
+  db.exec(new TextDecoder().decode(readFileSync(new URL('./schema.sql',import.meta.url))));
   const tick = () => new Promise((r) => setImmediate(r));
   return {
     _db: db,
@@ -270,3 +270,15 @@ test('malformed pairing JSON is400',async()=>{const env=makeEnv();const r=await 
 
 
 test('pair landing no enrollment or secret query and strict policy',async()=>{const w=(await import('./worker.js')).default;const r=await w.fetch(new Request('https://proxy.test/pair'),makeEnv(),{});assert.equal(r.status,200);assert.equal(r.headers.get('Referrer-Policy'),'no-referrer');assert.equal(r.headers.get('Cache-Control'),'no-store');const b=await r.text();assert.ok(b.includes('location.hash'));assert.ok(!b.includes('fetch('));assert.ok(!b.includes('https://'));assert.ok(r.headers.get('Content-Security-Policy').includes("default-src 'none'"));});
+
+
+test('exact v0.4 client scaffold stripped, only user forwarded',async()=>{
+ const env=makeEnv();let sent;setFetch(async(u,opts)=>{sent=JSON.parse(opts.body);return sseResponse();});
+ const body={"model": "nvidia/nemotron-3-ultra-550b-a55b:free", "max_tokens": 1024, "messages": [{"role": "system", "content": "You are the voice of a chat-first Android launcher. Be brief and plain. You cannot perform device actions yourself; the launcher app handles app launches and message drafts. When visual formatting genuinely helps, you may answer in simple HTML (no scripts)."}, {"role": "user", "content": "Say hello. Synthetic compatibility test with no personal data."}], "provider": {"max_price": {"prompt": "0", "completion": "0"}}, "stream": true};
+ const r=await handleRequest(makeReq({body:JSON.stringify(body)}),env,{},FIXED_NOW);assert.equal(r.status,200);await r.text();assert.deepEqual(sent.messages,[body.messages[1]]);assert.equal(sent.model,'xingchen-agi/xing4.0-29b-a4b:free');
+});
+test('v0.4 compatibility rejects changed scaffold and extra history',async()=>{
+ for(const mutate of [b=>b.messages[0].content+='x',b=>b.messages.push({role:'assistant',content:'history'}),b=>b.messages[1].role='system']){
+ const body={"model": "nvidia/nemotron-3-ultra-550b-a55b:free", "max_tokens": 1024, "messages": [{"role": "system", "content": "You are the voice of a chat-first Android launcher. Be brief and plain. You cannot perform device actions yourself; the launcher app handles app launches and message drafts. When visual formatting genuinely helps, you may answer in simple HTML (no scripts)."}, {"role": "user", "content": "Say hello. Synthetic compatibility test with no personal data."}], "provider": {"max_price": {"prompt": "0", "completion": "0"}}, "stream": true};mutate(body);let calls=0;setFetch(async()=>{calls++;return sseResponse();});const r=await handleRequest(makeReq({body:JSON.stringify(body)}),makeEnv(),{},FIXED_NOW);assert.equal(r.status,400);assert.equal(calls,0);
+ }
+});
