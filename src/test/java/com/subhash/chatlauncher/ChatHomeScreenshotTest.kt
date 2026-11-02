@@ -31,6 +31,8 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.printToLog
 import androidx.compose.ui.graphics.toArgb
@@ -90,6 +92,7 @@ class ChatHomeScreenshotTest {
         installFakeApp("com.android.camera2", "Camera")
         installFakeApp("com.google.android.gm", "Gmail", canSend = true)
         installFakeApp("com.google.android.deskclock", "Clock")
+        installFakeApp("com.android.settings", "Settings")
         // Let the clock app resolve alarm/timer intents (Focus profile's Timer note).
         val pm = ApplicationProvider.getApplicationContext<android.content.Context>().packageManager
         val spm: ShadowPackageManager = Shadows.shadowOf(pm)
@@ -659,8 +662,58 @@ class ChatHomeScreenshotTest {
         val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
         org.junit.Assert.assertNotNull("typed 'insta' dispatches the launch", started)
         org.junit.Assert.assertEquals("com.instagram.android", started.component?.packageName)
-        composeRule.onNodeWithText("Opening Instagram").assertExists()
+        composeRule.onNodeWithText("Asked Android to open Instagram", substring = true).assertExists()
         field.assertIsNotFocused()
+    }
+
+    /** Exact app word + Enter opens the app locally (user 21:50: typed 'settings' must open
+     *  Settings, never the API-key/cloud path). */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsTypedOpensSettingsApp() {
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("settings")
+        composeRule.onNodeWithText("settings").performImeAction()
+        composeRule.waitForIdle()
+        val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
+        org.junit.Assert.assertNotNull("typed 'settings' dispatches the launch", started)
+        org.junit.Assert.assertEquals("com.android.settings", started.component?.packageName)
+    }
+
+    /** Long-press a suggestion chip: App info opens the OS app-details page for that package. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun suggestionLongPressAppInfo() {
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("insta")
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Instagram").performTouchInput { longClick() }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("app_actions_dialog").assertExists()
+        composeRule.onNodeWithText("App info").performClick()
+        composeRule.waitForIdle()
+        val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
+        org.junit.Assert.assertNotNull("App info dispatches the details intent", started)
+        org.junit.Assert.assertEquals(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, started.action)
+        org.junit.Assert.assertEquals("package:com.instagram.android", started.dataString)
+    }
+
+    /** Long-press a suggestion chip: Uninstall routes to the OS delete flow (it confirms). */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun suggestionLongPressUninstall() {
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("insta")
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Instagram").performTouchInput { longClick() }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("app_actions_dialog").assertExists()
+        composeRule.onNodeWithText("Uninstall").performClick()
+        composeRule.waitForIdle()
+        val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
+        org.junit.Assert.assertNotNull("Uninstall dispatches the OS delete flow", started)
+        org.junit.Assert.assertEquals(Intent.ACTION_DELETE, started.action)
+        org.junit.Assert.assertEquals("package:com.instagram.android", started.dataString)
     }
 
     /** Honest terminal failure: a launch the OS rejects returns a clear "Couldn't open" message,
@@ -708,7 +761,7 @@ class ChatHomeScreenshotTest {
         composeRule.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
         composeRule.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Opening Instagram").assertExists()
+        composeRule.onNodeWithText("Asked Android to open Instagram", substring = true).assertExists()
         composeRule.onNodeWithText("write what you want to do").assertExists()
         composeRule.onNodeWithText("which one?", substring = true).assertDoesNotExist()
     }
