@@ -174,7 +174,8 @@ class CommandRouter(
     companion object {
         const val FOCUS = "Focus"
         const val WORK = "Work"
-        val BUILTIN_PROFILES = linkedSetOf(FOCUS, WORK)
+        const val REASONING = "Reasoning"
+        val BUILTIN_PROFILES = linkedSetOf(FOCUS, WORK, REASONING)
 
         /** Synthetic dock identity for the Focus profile's clock-app shortcut. */
         const val TIMER_KEY = "special:timer"
