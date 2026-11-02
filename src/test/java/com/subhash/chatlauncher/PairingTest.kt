@@ -117,7 +117,7 @@ class PairingTest {
             assertEquals(LlmClient.DEFAULT_CHAT_ENDPOINT, prefs.getString("chat_endpoint", ""))
             scenario.onActivity { assertNull("pairing intent data is cleared after handling", it.intent?.data) }
             val texts = HistoryStore(prefs).all().map { it.text }
-            assertTrue(texts.any { it.contains("AI connected - Ask AI is ready") })
+            assertTrue(texts.any { it.contains("This installation is paired") })
             assertFalse(texts.any { it.contains("per-install-cred") || it.contains("one-use-code") })
         }
     }
