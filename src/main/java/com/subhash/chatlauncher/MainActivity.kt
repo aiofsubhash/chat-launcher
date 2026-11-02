@@ -323,7 +323,7 @@ class MainActivity : ComponentActivity() {
                 is LlmClient.RedeemResult.Connected -> {
                     router.apiKey = result.credential
                     router.chatEndpoint = result.endpoint
-                    pairSay("AI connected - Ask AI is ready. The credential stays on this device.")
+                    pairSay("This installation is paired - the credential stays on this device. Each Ask AI request will show its own result.")
                 }
                 LlmClient.RedeemResult.InvalidOrExpired -> pairSay("That pairing link is expired or already used - ask for a fresh one.")
                 LlmClient.RedeemResult.RateLimited -> pairSay("Too many pairing attempts - wait a little, then tap the link again.")
@@ -1131,6 +1131,7 @@ fun SettingsPage(
     switcherInitiallyOpen: Boolean = false,
     pickerInitiallyOpen: Boolean = false,
     editorInitiallyOpen: Boolean = false,
+    advancedInitiallyOpen: Boolean = false,
     initialSection: String? = null,
 ) {
     val settingsContext = LocalContext.current
@@ -1176,6 +1177,7 @@ fun SettingsPage(
                     switcherInitiallyOpen = switcherInitiallyOpen,
                     pickerInitiallyOpen = pickerInitiallyOpen,
                     editorInitiallyOpen = editorInitiallyOpen,
+                    advancedInitiallyOpen = advancedInitiallyOpen,
                     initialSection = initialSection,
                 )
             }
@@ -1246,6 +1248,7 @@ fun SettingsContent(
     switcherInitiallyOpen: Boolean = false,
     pickerInitiallyOpen: Boolean = false,
     editorInitiallyOpen: Boolean = false,
+    advancedInitiallyOpen: Boolean = false,
     initialSection: String? = null,
 ) {
     val settingsContext = LocalContext.current
@@ -1500,61 +1503,89 @@ fun SettingsContent(
                 }
                 "account" -> item {
                     Text("Connect AI", style = MaterialTheme.typography.titleMedium, fontFamily = roundedFont, modifier = Modifier.padding(bottom = 10.dp))
+                    if (key.isNotBlank()) {
+                        Text("This installation is paired.", fontFamily = roundedFont, fontSize = 15.sp, color = accentText)
+                    } else {
+                        Text("AI isn't connected yet.", fontFamily = roundedFont, fontSize = 15.sp, color = MaterialTheme.colorScheme.onBackground)
+                        Text(
+                            "Tap the pairing link you were sent and this connects itself - no API key to enter, nothing to paste.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                    }
                     Text(
-                        "Open-ended questions can go to a cloud AI - only when you tap \"Ask AI\" on a specific message, and only that message's text is sent. The provider's terms say don't send personal or confidential info; what you send leaves this phone and the provider logs it. Apps, drafts, notes, history and profiles never leave the phone.",
+                        "Open-ended questions can go to a cloud AI - only when you tap \"Ask AI\" on a specific message, and only that message's text is sent. Apps, drafts, notes, history and profiles never leave this phone. What the cloud route retains depends on the server's current approved provider, so avoid sending personal or confidential info.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 10.dp),
                     )
-                    OutlinedTextField(
-                        value = key,
-                        onValueChange = onKey,
-                        label = { Text("API key or pairing code") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(6.dp),
-                        modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
-                    )
+                    var advancedOpen by rememberSaveable { mutableStateOf(advancedInitiallyOpen) }
                     Text(
-                        "Stored only on this device.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 6.dp),
+                        if (advancedOpen) "Hide advanced" else "Advanced: manual key or custom provider",
+                        fontFamily = roundedFont,
+                        fontSize = 14.sp,
+                        color = accentText,
+                        modifier = Modifier
+                            .padding(top = 12.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { advancedOpen = !advancedOpen }
+                            .padding(vertical = 8.dp)
+                            .testTag("account_advanced_toggle"),
                     )
-                    OutlinedTextField(
-                        value = endpoint,
-                        onValueChange = onEndpoint,
-                        label = { Text("Chat endpoint (optional)") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(6.dp),
-                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    )
-                    Text(
-                        "Full URL of a chat endpoint (for example a Cloudflare Worker). With one set, the server chooses the model and your pairing code goes as the credential.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 6.dp),
-                    )
-                    if (endpoint.isBlank()) {
+                    if (advancedOpen) {
                         OutlinedTextField(
-                            value = model,
-                            onValueChange = onModel,
-                            label = { Text("Model (optional)") },
+                            value = key,
+                            onValueChange = onKey,
+                            label = { Text("API key or pairing code") },
+                            singleLine = true,
+                            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                        )
+                        Text(
+                            "Stored only on this device.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 6.dp),
+                        )
+                        OutlinedTextField(
+                            value = endpoint,
+                            onValueChange = onEndpoint,
+                            label = { Text("Chat endpoint (optional)") },
                             singleLine = true,
                             shape = RoundedCornerShape(6.dp),
                             modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                         )
                         Text(
-                            "Anthropic key: Claude by default. OpenRouter key (sk-or-...): free Nemotron by default - paste another model id to change it. Only models verified free on OpenRouter are accepted.",
+                            "Full URL of a chat endpoint (for example a Cloudflare Worker). With one set, the server chooses the model and your pairing code goes as the credential.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 6.dp),
                         )
-                        if (modelStatus != null) {
+                        if (endpoint.isBlank()) {
+                            OutlinedTextField(
+                                value = model,
+                                onValueChange = onModel,
+                                label = { Text("Model (optional)") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                            )
                             Text(
-                                modelStatus,
+                                "Anthropic key: Claude by default. OpenRouter key (sk-or-...): free Nemotron by default - paste another model id to change it. Only models verified free on OpenRouter are accepted.",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = accentText,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(top = 6.dp),
                             )
+                            if (modelStatus != null) {
+                                Text(
+                                    modelStatus,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = accentText,
+                                    modifier = Modifier.padding(top = 6.dp),
+                                )
+                            }
                         }
                     }
                 }
