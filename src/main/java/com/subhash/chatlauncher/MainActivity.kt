@@ -463,7 +463,21 @@ fun ChatHome(
 
     // Dock: no profile = the user's chosen apps; a profile shows exactly its allow-list
     // (Timer first in Focus; work entries first in Work).
-    val allInstalled = allApps()
+    // First composition can race LauncherApps visibility (Robolectric flushes installs
+    // async; a real launcher cold start can hit the same window). Retry briefly after
+    // composition so the dock always settles (00:17 diagnostic: zero dock notes until the
+    // first keystroke forced a re-query). Bounded; a healthy first query exits at once.
+    var allInstalled by remember { mutableStateOf(allApps()) }
+    LaunchedEffect(Unit) {
+        var apps = allInstalled
+        var attempts = 0
+        while (apps.isEmpty() && attempts < 10) {
+            kotlinx.coroutines.delay(100)
+            apps = allApps()
+            attempts++
+        }
+        allInstalled = apps
+    }
     val workKeys = allInstalled.filter { it.isWork }.map { it.identityKey }.toSet()
     val dockApps: List<AppEntry> = run {
         val profile = activeProfile
