@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
@@ -49,6 +50,7 @@ class SettingsFlowTest {
             .getSharedPreferences("flow_test_prefs", Context.MODE_PRIVATE)
         prefs.edit().clear().commit()
         router = CommandRouter(composeRule.activity, prefs)
+        // Allow-list semantics: these are the apps each profile CAN open.
         router.saveProfile("Study", setOf("com.spotify.music"))
         router.saveProfile("Sleep", setOf("com.android.chrome"))
         router.activeProfile = "Study"
@@ -74,7 +76,7 @@ class SettingsFlowTest {
     @Test
     fun cancelDiscardsProfileToggle() {
         openFocusSettings()
-        composeRule.onAllNodesWithText("Use")[0].performClick() // stage Sleep as active
+        composeRule.onAllNodesWithText("Use")[2].performClick() // stage Sleep as active
         composeRule.onNodeWithText("Cancel").performClick()
         assertEquals("Study", router.activeProfile)
     }
@@ -82,7 +84,7 @@ class SettingsFlowTest {
     @Test
     fun saveAppliesProfileToggle() {
         openFocusSettings()
-        composeRule.onAllNodesWithText("Use")[0].performClick()
+        composeRule.onAllNodesWithText("Use")[2].performClick() // Sleep
         composeRule.onNodeWithText("Save").performClick()
         assertEquals("Sleep", router.activeProfile)
     }
@@ -90,7 +92,7 @@ class SettingsFlowTest {
     @Test
     fun deleteNeedsSecondTap() {
         openFocusSettings()
-        composeRule.onAllNodesWithText("Delete")[1].performClick() // Sleep's Delete -> Confirm delete
+        composeRule.onAllNodesWithText("Delete")[0].performClick() // Sleep's Delete -> Confirm delete (built-ins have no Delete)
         composeRule.onNodeWithText("Confirm delete").assertExists()
         composeRule.onNodeWithText("Save").performClick()
         assertTrue(router.profileNames().contains("Sleep")) // single tap + Save does not delete
@@ -99,39 +101,48 @@ class SettingsFlowTest {
     @Test
     fun confirmedDeleteAppliesOnSave() {
         openFocusSettings()
-        composeRule.onAllNodesWithText("Delete")[1].performClick()
+        composeRule.onAllNodesWithText("Delete")[0].performClick() // Sleep
         composeRule.onNodeWithText("Confirm delete").performClick()
         composeRule.onNodeWithText("Save").performClick()
         assertFalse(router.profileNames().contains("Sleep")) // confirmed delete applies on Save
     }
 
     @Test
-    fun editProfileHiddenAppsSaves() {
+    fun editProfileAllowedAppsSaves() {
         openFocusSettings()
-        composeRule.onAllNodesWithText("Edit")[0].performClick() // Study
-        composeRule.onNodeWithText("Apps hidden in Study:").assertExists()
-        composeRule.onNodeWithText("WhatsApp").performClick() // add WhatsApp to Study's hidden apps
+        composeRule.onAllNodesWithText("Edit")[3].performClick() // Study (Focus, Work, Sleep, Study)
+        composeRule.onNodeWithText("Apps \"Study\" can open:").assertExists()
+        composeRule.onNodeWithTag("profile_app_com.whatsapp").performClick() // add WhatsApp to Study's allowed apps
         composeRule.onNodeWithText("Save").performClick()
-        assertEquals(setOf("com.spotify.music", "com.whatsapp"), router.profileHidden("Study"))
+        assertEquals(setOf("com.spotify.music", "com.whatsapp"), router.profileAllowed("Study"))
     }
 
     @Test
     fun cancelDiscardsNewProfile() {
         openFocusSettings()
         composeRule.onNodeWithText("+ New profile").performClick()
-        composeRule.onNode(hasSetTextAction()).performTextInput("Work")
+        composeRule.onNode(hasSetTextAction()).performTextInput("Trip")
         composeRule.onNodeWithText("Cancel").performClick()
-        assertFalse(router.profileNames().contains("Work"))
+        assertFalse(router.profileNames().contains("Trip"))
     }
 
     @Test
     fun newProfileSavesWithChosenApps() {
         openFocusSettings()
         composeRule.onNodeWithText("+ New profile").performClick()
-        composeRule.onNode(hasSetTextAction()).performTextInput("Work")
+        composeRule.onNode(hasSetTextAction()).performTextInput("Trip")
         composeRule.onNodeWithText("Gmail").performScrollTo() // 6th checkbox: below the laid-out viewport
         composeRule.onNodeWithText("Gmail").performClick()
         composeRule.onNodeWithText("Save").performClick()
-        assertEquals(setOf("com.google.android.gm"), router.profileHidden("Work"))
+        assertEquals(setOf("com.google.android.gm"), router.profileAllowed("Trip"))
+    }
+
+    @Test
+    fun builtInsListedWithoutDelete() {
+        openFocusSettings()
+        composeRule.onNodeWithText("Focus").assertExists()
+        composeRule.onNodeWithText("Work").assertExists()
+        // Only the two custom profiles get a Delete action.
+        assertEquals(2, composeRule.onAllNodesWithText("Delete").fetchSemanticsNodes().size)
     }
 }
