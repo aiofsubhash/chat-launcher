@@ -45,6 +45,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.semantics.contentDescription
@@ -215,6 +219,17 @@ class MainActivity : ComponentActivity() {
                 else -> isSystemInDarkTheme()
             }
             MaterialTheme(colorScheme = if (darkTheme) darkCalmColors else calmColors) {
+                // System bars wear the paper background too; icons contrast with the theme.
+                val barBg = MaterialTheme.colorScheme.background
+                val barView = LocalView.current
+                SideEffect {
+                    val w = (barView.context as android.app.Activity).window
+                    w.statusBarColor = barBg.toArgb()
+                    w.navigationBarColor = barBg.toArgb()
+                    val ctl = WindowInsetsControllerCompat(w, barView)
+                    ctl.isAppearanceLightStatusBars = !darkTheme
+                    ctl.isAppearanceLightNavigationBars = !darkTheme
+                }
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 ChatHome(
                     router = router,
@@ -1558,14 +1573,16 @@ fun ReasoningOnboardingContent(
             color = MaterialTheme.colorScheme.background,
             modifier = Modifier
                 .fillMaxWidth(0.92f)
-                // Wrap-content with a max bound: any forced minimum/fixed height fights the
-                // dialog window's own resizing and never settles (AppNotIdle in tests,
-                // relayout churn risk on device). Grows toward 78% as answers accumulate.
-                .heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.78f).dp),
+                // The 70-80% popup the user asked for. Bounded, and safe now that the
+                // TextField loop is fixed via dialog window properties.
+                .heightIn(
+                    min = (LocalConfiguration.current.screenHeightDp * 0.7f).dp,
+                    max = (LocalConfiguration.current.screenHeightDp * 0.78f).dp,
+                ),
         ) {
             Box {
-                PaperGrid(Modifier.fillMaxSize(), wobbly = wobbly)
-                Column(modifier = Modifier.padding(20.dp)) {
+                PaperGrid(Modifier.matchParentSize(), wobbly = wobbly)
+                Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
                     Text("Before Reasoning turns on", style = MaterialTheme.typography.titleMedium, fontFamily = roundedFont)
                     Text(
                         "Let's talk first - a few short questions. Answers stay on this phone (Settings > Context).",
@@ -1573,7 +1590,7 @@ fun ReasoningOnboardingContent(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 6.dp),
                     )
-                    Column(modifier = Modifier.verticalScroll(rememberScrollState()).padding(top = 14.dp)) {
+                    Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(top = 14.dp)) {
                         qa.forEach { (q, a) ->
                             Text(q, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(a, fontFamily = roundedFont, fontSize = 15.sp, color = MaterialTheme.colorScheme.onBackground,
@@ -1637,7 +1654,7 @@ fun ReasoningInterventionDialog(
             modifier = Modifier.fillMaxWidth(0.92f).wrapContentHeight(),
         ) {
             Box {
-                PaperGrid(Modifier.fillMaxSize(), wobbly = wobbly)
+                PaperGrid(Modifier.matchParentSize(), wobbly = wobbly)
                 Column(modifier = Modifier.padding(20.dp)) {
                     Text("Before ${app.displayLabel}…", style = MaterialTheme.typography.titleMedium, fontFamily = roundedFont)
                     Text(
