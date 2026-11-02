@@ -28,6 +28,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.assertIsDisplayed
@@ -750,6 +751,8 @@ class ChatHomeScreenshotTest {
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
     fun swipeLeftOpensAppGrid() {
+        ApplicationProvider.getApplicationContext<android.content.Context>().getSharedPreferences("chat_launcher", 0).edit().remove("active_profile").commit()
+        composeRule.activityRule.scenario.recreate()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("write what you want to do").performTextInput("a")
         composeRule.onNodeWithText("a").performTextClearance()
@@ -758,6 +761,56 @@ class ChatHomeScreenshotTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("All apps").assertExists()
         composeRule.onNodeWithText("WhatsApp").assertExists()
+    }
+
+    /** Owner 22:53: right swipe opens the camera app in Normal mode. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun swipeRightLaunchesCameraInNormal() {
+        ApplicationProvider.getApplicationContext<android.content.Context>().getSharedPreferences("chat_launcher", 0).edit().remove("active_profile").commit()
+        composeRule.activityRule.scenario.recreate()
+        composeRule.waitForIdle()
+        composeRule.onRoot().performTouchInput { swipeRight() }
+        composeRule.waitForIdle()
+        val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
+        org.junit.Assert.assertNotNull("right swipe dispatches the camera launch", started)
+        org.junit.Assert.assertEquals("com.android.camera2", started.component?.packageName)
+    }
+
+    /** Owner 22:53: the grid stays closed under a profile; camera respects the allow-list
+     *  (Focus allows only the Timer note). */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun swipesRespectFocusProfile() {
+        val p = ApplicationProvider.getApplicationContext<android.content.Context>().getSharedPreferences("chat_launcher", 0)
+        p.edit().putString("active_profile", "Focus").commit()
+        composeRule.activityRule.scenario.recreate()
+        composeRule.waitForIdle()
+        composeRule.onRoot().performTouchInput { swipeLeft() }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("All apps").assertDoesNotExist()
+        composeRule.onRoot().performTouchInput { swipeRight() }
+        composeRule.waitForIdle()
+        val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
+        org.junit.Assert.assertNull("camera is not in the Focus allow-list", started)
+    }
+
+    /** Right swipe dismisses the grid. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun swipeRightDismissesAppGrid() {
+        ApplicationProvider.getApplicationContext<android.content.Context>().getSharedPreferences("chat_launcher", 0).edit().remove("active_profile").commit()
+        composeRule.activityRule.scenario.recreate()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("a")
+        composeRule.onNodeWithText("a").performTextClearance()
+        composeRule.waitForIdle()
+        composeRule.onRoot().performTouchInput { swipeLeft() }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("All apps").assertExists()
+        composeRule.onRoot().performTouchInput { swipeRight() }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("All apps").assertDoesNotExist()
     }
 
     /** Long-press a suggestion chip: App info opens the OS app-details page for that package. */
