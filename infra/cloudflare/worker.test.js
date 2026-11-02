@@ -172,3 +172,47 @@ test('new minute window resets the minute counter', async () => {
   const later = new Date('2026-11-02T12:01:00.000Z');
   assert.equal((await okRequest(env, later)).status, 200);
 });
+
+test('GET /health -> 200 ok (routed through the fetch export)', async () => {
+  const worker = (await import('./worker.js')).default;
+  const res = await worker.fetch(new Request('https://proxy.test/health', { method: 'GET' }), makeEnv(), {});
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { status: 'ok' });
+});
+
+test('upstream free-only gate: no provider allow-list, all four price fields zero', async () => {
+  let captured;
+  globalThis.fetch = async (url, init) => { captured = JSON.parse(init.body); return sseResponse(); };
+  const res = await handleRequest(makeReq(), makeEnv(), {}, FIXED_NOW);
+  assert.equal(res.status, 200);
+  assert.equal(captured.provider.allow_fallbacks, false);
+  assert.deepEqual(captured.provider.max_price, { prompt: 0, completion: 0, request: 0, image: 0 });
+  assert.ok(!('only' in captured.provider), 'no ungrounded provider allow-list');
+});
+
+test('POST-HEADER hang: stream that never yields is aborted mid-flight and terminates', async () => {
+  // Upstream sends headers (200) then nothing. The lifetime timer must abort the fetch
+  // mid-stream; pipeTo propagates the error; the client-visible stream ends. No unhandled
+  // rejections from touching the locked writable.
+  // Model undici faithfully: when the fetch signal aborts mid-stream, the response body
+  // errors with an abort error (fetch spec termination), which pipeTo propagates.
+  globalThis.fetch = async (url, init) => {
+    let ctrl;
+    const stream = new ReadableStream({
+      start(c) {
+        ctrl = c; // never enqueues on its own
+        init.signal.addEventListener('abort', () => {
+          c.error(Object.assign(new Error('The operation was aborted.'), { name: 'AbortError' }));
+        });
+      },
+    });
+    return new Response(stream, { status: 200 });
+  };
+  const env = makeEnv({ UPSTREAM_TIMEOUT_MS: '80' });
+  const res = await handleRequest(makeReq(), env, {}, FIXED_NOW);
+  assert.equal(res.status, 200); // headers already out; failure shows as stream termination
+  const reader = res.body.getReader();
+  const started = Date.now();
+  await assert.rejects(reader.read(), /abort|Abort|terminated|network|error/i);
+  assert.ok(Date.now() - started < 5000, 'stream ended promptly after abort');
+});
