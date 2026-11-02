@@ -211,6 +211,7 @@ async function handleRequest(request, env, ctx, now = new Date(), catalog = CATA
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    if (url.pathname === '/pair' && request.method === 'GET') return pairingPage();
     if (url.pathname === '/v1/pair/redeem') return redeem(request,env);
     if (url.pathname === '/health' && request.method === 'GET') {
       return new Response(JSON.stringify({ status: 'ok' }), {
@@ -276,3 +277,5 @@ async function redeem(request,env) {
   } catch(e) { return errorResponse(e instanceof HttpError ? e.status : 503,'pairing unavailable'); }
 }
 export {eligibleEndpoint,authenticated,redeem};
+
+function pairingPage() { return new Response("<!doctype html><html lang=\"en\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"referrer\" content=\"no-referrer\"><title>Connect launcher</title><body><h1>Connect launcher</h1><p id=\"status\">Checking pairing link...</p><a id=\"open\" hidden>Open launcher and connect</a><p>Only use a link sent privately to you. No API key is needed.</p><script>const p=new URLSearchParams(location.hash.slice(1));const c=p.get('code');history.replaceState(null,'',location.pathname);const a=document.getElementById('open');if(c&&/^[a-f0-9]{64}$/.test(c)){a.href='chatlauncher://pair?code='+encodeURIComponent(c);a.hidden=false;document.getElementById('status').textContent='Tap below to connect this installation. The link expires after 15 minutes and works once.';}else{document.getElementById('status').textContent='This pairing link is invalid. Request a fresh link.';}</script></body></html>",{headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; script-src 'sha256-TWD0JR/kqq7mEuvYNz1Ek/AiwhTex+5EGwC0BOpWHiY='; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Permissions-Policy':'camera=(), microphone=(), geolocation=()'}}); }
