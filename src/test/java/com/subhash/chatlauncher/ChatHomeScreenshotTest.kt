@@ -794,6 +794,11 @@ class ChatHomeScreenshotTest {
         composeRule.waitForIdle()
     }
 
+    private fun typeWords(n: Int) {
+        composeRule.onNodeWithText("write what you want to do").performTextInput((1..n).joinToString(" ") { "word$it" })
+        composeRule.waitForIdle()
+    }
+
     /** Query shortcuts: long typed queries show ChatGPT / Claude / Google prefill chips. */
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
@@ -804,40 +809,57 @@ class ChatHomeScreenshotTest {
         composeRule.onNodeWithContentDescription("Google").assertExists()
     }
 
-    /** Short input stays clean: no query-shortcut chips below the threshold. */
+    /** Owner said "more than four, five words": five-word threshold, four words stays clean. */
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
     fun shortQueryHidesQueryShortcuts() {
-        composeRule.onNodeWithText("write what you want to do").performTextInput("hi")
-        composeRule.waitForIdle()
+        typeWords(4)
         composeRule.onNodeWithContentDescription("ChatGPT").assertDoesNotExist()
+        typeWords(5)
+        composeRule.onNodeWithContentDescription("ChatGPT").assertExists()
     }
 
-    /** ChatGPT chip dispatches an ACTION_VIEW with the verified chatgpt.com/?q= prefill contract. */
+    /** ChatGPT fallback (main 23:49/23:52): copies the query to the clipboard and opens a
+     *  blank chat - never the auto-sending ?q= form observed live on 23:48. */
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
-    fun chatGptChipDispatchesPrefillIntent() {
+    fun chatGptChipCopiesQueryAndOpensBlankChat() {
         typeLongQuery()
         composeRule.onNodeWithContentDescription("ChatGPT").performClick()
         composeRule.waitForIdle()
         val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
         org.junit.Assert.assertNotNull("ChatGPT chip dispatches a view intent", started)
         org.junit.Assert.assertEquals(android.content.Intent.ACTION_VIEW, started.action)
-        val url = started.dataString ?: ""
-        org.junit.Assert.assertTrue("prefill URL uses chatgpt.com/?q=, got $url", url.startsWith("https://chatgpt.com/?q="))
-        org.junit.Assert.assertTrue("query text is carried in the URL, got $url", url.contains("capital%20of%20france"))
+        org.junit.Assert.assertEquals("blank new chat, no auto-send query param", "https://chatgpt.com/", started.dataString)
+        val cm = composeRule.activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        org.junit.Assert.assertTrue("query copied to clipboard", cm.primaryClip?.getItemAt(0)?.text?.contains("capital of france") == true)
     }
 
-    /** Claude chip dispatches the verified claude.ai/new?q= prefill contract. */
+    /** Claude fallback (main 23:52): draft semantics unverified on Android/web, so same
+     *  copy + blank-chat treatment as ChatGPT. */
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
-    fun claudeChipDispatchesPrefillIntent() {
+    fun claudeChipCopiesQueryAndOpensBlankChat() {
         typeLongQuery()
         composeRule.onNodeWithContentDescription("Claude").performClick()
         composeRule.waitForIdle()
         val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
         org.junit.Assert.assertNotNull("Claude chip dispatches a view intent", started)
-        org.junit.Assert.assertTrue("prefill URL uses claude.ai/new?q=, got ${started.dataString}", (started.dataString ?: "").startsWith("https://claude.ai/new?q="))
+        org.junit.Assert.assertEquals("blank new chat, no unverified prefill", "https://claude.ai/new", started.dataString)
+        val cm = composeRule.activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        org.junit.Assert.assertTrue("query copied to clipboard", cm.primaryClip?.getItemAt(0)?.text?.contains("capital of france") == true)
+    }
+
+    /** Google keeps the direct search the owner asked for (21:52). */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun googleChipDispatchesDirectSearch() {
+        typeLongQuery()
+        composeRule.onNodeWithContentDescription("Google").performClick()
+        composeRule.waitForIdle()
+        val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
+        org.junit.Assert.assertNotNull("Google chip dispatches a view intent", started)
+        org.junit.Assert.assertTrue("google search URL, got ${started.dataString}", (started.dataString ?: "").startsWith("https://www.google.com/search?q="))
     }
 
     /** Render: query-shortcut chips under a long typed query. */
