@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -60,6 +61,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlin.math.sin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -202,6 +207,8 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var router: CommandRouter
     private lateinit var historyStore: HistoryStore
+    private val pairScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var pairMessage by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -233,6 +240,8 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 ChatHome(
                     router = router,
+                    pairMessage = pairMessage,
+                    onPairMessageConsumed = { pairMessage = null },
                     themeMode = themeMode,
                     onThemeMode = { themeMode = it; router.themeMode = it },
                     resolveApps = { query -> resolveApps(query) },
@@ -265,6 +274,61 @@ class MainActivity : ComponentActivity() {
                     },
                 )
                 }
+            }
+        }
+        handlePairIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handlePairIntent(intent)
+    }
+
+    override fun onDestroy() {
+        pairScope.cancel()
+        super.onDestroy()
+    }
+
+    /**
+     * One-tap Connect AI pairing: chatlauncher://pair?code=<single-use-code>.
+     * Only the code is read from the incoming URI; redemption is pinned to the fixed
+     * proxy host, and the URI, code, response and credential are never logged. The
+     * intent data is cleared so a recreate or relaunch never redeems twice. Pairing
+     * sends nothing to the AI - it only stores the per-install credential.
+     */
+    private fun pairSay(text: String) {
+        historyStore.append("assistant", "local", text)
+        pairMessage = text
+    }
+
+    private fun handlePairIntent(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_VIEW) return
+        val data = intent.data ?: return
+        if (!data.scheme.equals("chatlauncher", ignoreCase = true) || !data.host.equals("pair", ignoreCase = true)) return
+        var code = data.getQueryParameter("code").orEmpty()
+        if (code.isBlank()) {
+            // Landing page hands off chatlauncher://pair#code=... (fragment keeps it out of logs/history).
+            val frag = data.fragment.orEmpty()
+            code = if (frag.startsWith("code=")) frag.removePrefix("code=") else frag
+        }
+        intent.data = null
+        if (code.isBlank() || code.length > 512) {
+            pairSay("That pairing link didn't look right - ask for a fresh one. Nothing was sent.")
+            return
+        }
+        pairSay("Pairing link received - connecting AI...")
+        pairScope.launch {
+            when (val result = LlmClient.redeemPairingCode(code)) {
+                is LlmClient.RedeemResult.Connected -> {
+                    router.apiKey = result.credential
+                    router.chatEndpoint = result.endpoint
+                    pairSay("AI connected - Ask AI is ready. The credential stays on this device.")
+                }
+                LlmClient.RedeemResult.InvalidOrExpired -> pairSay("That pairing link is expired or already used - ask for a fresh one.")
+                LlmClient.RedeemResult.RateLimited -> pairSay("Too many pairing attempts - wait a little, then tap the link again.")
+                LlmClient.RedeemResult.Unavailable, LlmClient.RedeemResult.NetworkError -> pairSay("Couldn't reach the pairing service - check your connection and tap the link again.")
+                LlmClient.RedeemResult.InvalidShape -> pairSay("That pairing link didn't work - ask for a fresh one.")
             }
         }
     }
@@ -353,9 +417,12 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun ChatHome(
     router: CommandRouter,
+    pairMessage: String? = null,
+    onPairMessageConsumed: () -> Unit = {},
     themeMode: String = "system",
     onThemeMode: (String) -> Unit = {},
     resolveApps: (String) -> List<AppEntry>,
@@ -385,6 +452,8 @@ fun ChatHome(
     var reasoningIntervention by remember { mutableStateOf<AppEntry?>(null) }
     // Apps the user insisted on this session - no repeated interrogation after that.
     var reasoningBypassed by remember { mutableStateOf(setOf<String>()) }
+    // Long-pressed suggestion: offers App info / Uninstall (the OS confirms the uninstall).
+    var appActionsFor by remember { mutableStateOf<AppEntry?>(null) }
     val suggestions = remember(input, activeProfile) { if (input.isBlank()) emptyList() else resolveApps(input) }
     val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
@@ -441,6 +510,14 @@ fun ChatHome(
     ) {
         messages = messages + ChatMessage(false, text, fromCloud = fromCloud, choiceApps = choiceApps, onChoice = onChoice, askAi = askAi)
         if (text.isNotBlank()) history?.append("assistant", if (fromCloud) "cloud" else "local", text)
+    }
+
+    LaunchedEffect(pairMessage) {
+        val m = pairMessage
+        if (m != null) {
+            messages = messages + ChatMessage(false, m)
+            onPairMessageConsumed()
+        }
     }
 
     fun handleDraft(result: CommandRouter.Result.DraftMessage) {
@@ -763,13 +840,17 @@ fun ChatHome(
                                     color = MaterialTheme.colorScheme.secondaryContainer,
                                     modifier = Modifier
                                         .padding(end = 8.dp)
-                                        .clickable {
-                                            keyboardController?.hide()
-                                            focusManager.clearFocus()
-                                            if (!launchApp(app)) {
-                                                addAssistant(CommandRouter.launchFailureMessage(app))
-                                            }
-                                        },
+                                        .combinedClickable(
+                                            onClick = {
+                                                keyboardController?.hide()
+                                                focusManager.clearFocus()
+                                                if (!launchApp(app)) {
+                                                    addAssistant(CommandRouter.launchFailureMessage(app))
+                                                }
+                                            },
+                                            // Long-press: App info / Uninstall (user 21:50).
+                                            onLongClick = { appActionsFor = app },
+                                        ),
                                 ) {
                                     Text(app.displayLabel, fontSize = 14.sp, modifier = Modifier.heightIn(min = 48.dp).wrapContentHeight().padding(horizontal = 12.dp))
                                 }
@@ -817,6 +898,55 @@ fun ChatHome(
             contextEntries = userContext.entries(),
             onClose = { showSettings = false },
         )
+    }
+
+    appActionsFor?.let { target ->
+            Dialog(onDismissRequest = { appActionsFor = null }) {
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.background,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)),
+                    shadowElevation = 8.dp,
+                    modifier = Modifier.fillMaxWidth(0.85f).wrapContentHeight().testTag("app_actions_dialog"),
+                ) {
+                    Column(modifier = Modifier.padding(20.dp)) {
+                        Text(target.displayLabel, style = MaterialTheme.typography.titleMedium, fontFamily = roundedFont)
+                        Text(
+                            "App info",
+                            fontFamily = roundedFont, fontSize = 16.sp, color = accentText,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    appActionsFor = null
+                                    try {
+                                        context.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + target.packageName)))
+                                    } catch (e: Exception) {
+                                        addAssistant("Couldn't open app details for ${target.displayLabel}.")
+                                    }
+                                }
+                                .padding(vertical = 12.dp),
+                        )
+                        Text(
+                            "Uninstall",
+                            fontFamily = roundedFont, fontSize = 16.sp, color = accentText,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    appActionsFor = null
+                                    // ACTION_DELETE always routes through the OS confirmation UI.
+                                    try {
+                                        context.startActivity(Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:" + target.packageName)))
+                                    } catch (e: Exception) {
+                                        addAssistant("Couldn't start the uninstall for ${target.displayLabel}.")
+                                    }
+                                }
+                                .padding(vertical = 12.dp),
+                        )
+                    }
+                }
+            }
     }
 
     if (showReasoningOnboarding) {
