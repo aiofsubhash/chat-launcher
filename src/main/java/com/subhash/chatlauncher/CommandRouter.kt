@@ -3,12 +3,14 @@ package com.subhash.chatlauncher
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.SharedPreferences
+import android.provider.AlarmClock
 import androidx.activity.ComponentActivity
 
 /**
  * Turns a chat line into an action. Everything that leaves the app is a DRAFT
  * the user confirms in the target app - this launcher never sends messages
- * on the user's behalf by itself.
+ * on the user's behalf by itself. Profiles are ALLOW-lists: while a profile is
+ * on, only its apps (plus the Focus timer / Work's managed apps) can be opened.
  */
 class CommandRouter(
     private val activity: ComponentActivity,
@@ -28,6 +30,15 @@ class CommandRouter(
         get() = (prefs.getString("llm_free_ids", "") ?: "").split(',').filter { it.isNotBlank() }.toSet()
         set(v) = prefs.edit().putString("llm_free_ids", v.joinToString(",")).apply()
 
+    /**
+     * Optional chat endpoint (full chat-completions URL, e.g. a Cloudflare Worker) for the
+     * Connect AI path: the server holds the upstream key; apiKey then carries the pairing
+     * credential. Blank = talk to the key's own provider directly.
+     */
+    var chatEndpoint: String
+        get() = prefs.getString("chat_endpoint", "") ?: ""
+        set(v) = prefs.edit().putString("chat_endpoint", v).apply()
+
     var activeProfile: String?
         get() = prefs.getString("active_profile", null)?.takeIf { it.isNotBlank() }
         set(v) = prefs.edit().putString("active_profile", v ?: "").apply()
@@ -43,24 +54,75 @@ class CommandRouter(
             ?: DEFAULT_DOCK_APPS
         set(v) = prefs.edit().putString("dock_apps", v.take(4).joinToString(",")).apply()
 
-    fun profileNames(): Set<String> = prefs.getStringSet("profile_names", emptySet()) ?: emptySet()
+    // ---- Profiles: allow-lists. Built-ins: Focus (Timer only by default), Work (managed
+    // work apps + additions). Built-ins always exist and cannot be deleted.
 
-    fun profileHidden(name: String): Set<String> =
-        prefs.getStringSet("profile_$name", emptySet()) ?: emptySet()
+    fun customProfileNames(): Set<String> = prefs.getStringSet("profile_names", emptySet()) ?: emptySet()
 
-    fun saveProfile(name: String, hidden: Set<String>) {
-        prefs.edit()
-            .putStringSet("profile_names", profileNames() + name)
-            .putStringSet("profile_$name", hidden)
-            .apply()
+    fun profileNames(): Set<String> = BUILTIN_PROFILES + customProfileNames()
+
+    fun isBuiltin(name: String): Boolean = name in BUILTIN_PROFILES
+
+    /** Stored allow-list; an untouched Focus profile allows only the Timer note. */
+    fun profileAllowed(name: String): Set<String> {
+        val stored = prefs.getStringSet("profile_allow_$name", null)
+        if (stored != null) return stored
+        return if (name == FOCUS) setOf(TIMER_KEY) else emptySet()
+    }
+
+    fun saveProfile(name: String, allowed: Set<String>) {
+        val editor = prefs.edit().putStringSet("profile_allow_$name", allowed)
+        if (!isBuiltin(name)) editor.putStringSet("profile_names", customProfileNames() + name)
+        editor.apply()
     }
 
     fun deleteProfile(name: String) {
+        if (isBuiltin(name)) return // built-ins stay
         if (activeProfile == name) activeProfile = null
         prefs.edit()
-            .putStringSet("profile_names", profileNames() - name)
-            .remove("profile_$name")
+            .putStringSet("profile_names", customProfileNames() - name)
+            .remove("profile_allow_$name")
             .apply()
+    }
+
+    /** Work's effective list is its additions plus whatever the managed profile currently has. */
+    fun effectiveAllowed(name: String, workKeys: Set<String>): Set<String> =
+        if (name == WORK) profileAllowed(name) + workKeys else profileAllowed(name)
+
+    /** Keys openable right now; null = no profile active (everything openable). */
+    fun allowedNow(workKeys: Set<String>): Set<String>? =
+        activeProfile?.let { effectiveAllowed(it, workKeys) }
+
+    /**
+     * One-time migration from the old hidden-list format ("profile_<name>").
+     * Meaning-preserving: allowed = currently installed minus previously hidden. Deferred
+     * (nothing written) when the installed list is empty, so a profile never silently turns
+     * permissive or empty. Old sets are kept under profile_hidden_backup_<name>. A custom
+     * profile colliding with a new built-in migrates as "<name> (migrated)".
+     */
+    fun migrateHiddenProfiles(installedKeys: Set<String>): Boolean {
+        if (prefs.getBoolean("profiles_allow_migrated", false)) return true
+        if (installedKeys.isEmpty()) return false // defer, keep old data untouched
+        val oldKeys = prefs.all.keys.filter { it.startsWith("profile_") && !it.startsWith("profile_allow_") && !it.startsWith("profile_hidden_backup_") && it != "profile_names" }
+        val editor = prefs.edit()
+        var active = activeProfile
+        for (k in oldKeys) {
+            val oldName = k.removePrefix("profile_")
+            val hidden = prefs.getStringSet(k, emptySet()) ?: emptySet()
+            val allowed = installedKeys - hidden
+            val newName = if (isBuiltin(oldName)) "$oldName (migrated)" else oldName
+            editor.putStringSet("profile_allow_$newName", allowed)
+            editor.putStringSet("profile_hidden_backup_$oldName", hidden)
+            editor.remove(k)
+            if (newName != oldName) {
+                editor.putStringSet("profile_names", customProfileNames() + newName)
+                if (active == oldName) active = newName
+            }
+        }
+        if (active != activeProfile) editor.putString("active_profile", active ?: "")
+        editor.putBoolean("profiles_allow_migrated", true)
+        editor.apply()
+        return true
     }
 
     /** Theme preference: "system", "light" or "dark". */
@@ -68,10 +130,55 @@ class CommandRouter(
         get() = prefs.getString("theme_mode", "system") ?: "system"
         set(v) = prefs.edit().putString("theme_mode", v).apply()
 
-    /** Packages hidden by the currently active focus profile (empty when off). */
-    fun hiddenNow(): Set<String> = activeProfile?.let { profileHidden(it) } ?: emptySet()
+    // ---- Focus profile's Timer note: opens the phone's own clock/alarm app.
+
+    /** Best clock-app intent available on this device, or null when no clock app resolves. */
+    fun timerIntent(): Intent? {
+        val pm = activity.packageManager
+        val candidates = listOf(
+            Intent(AlarmClock.ACTION_SHOW_TIMERS),
+            Intent(AlarmClock.ACTION_SHOW_ALARMS),
+            Intent(AlarmClock.ACTION_SET_TIMER).putExtra(AlarmClock.EXTRA_LENGTH, 600),
+        )
+        return candidates.firstOrNull { it.resolveActivity(pm) != null }
+    }
+
+    /**
+     * Launch through LauncherApps with the entry's own UserHandle - the sanctioned API for
+     * launcher apps, reliable across personal and work profiles. Raw startActivity only when
+     * the entry carries no handle (PackageManager fallback path).
+     */
+    fun launchAppEntry(app: AppEntry): Boolean = try {
+        val handle = app.userHandle
+        val la = activity.getSystemService(android.content.pm.LauncherApps::class.java)
+        if (handle != null && app.launch.component != null) {
+            la.startMainActivity(app.launch.component, handle, null, null)
+        } else {
+            activity.startActivity(app.launch)
+        }
+        true
+    } catch (e: Exception) {
+        false
+    }
+
+    fun launchTimer(): Boolean {
+        val intent = timerIntent() ?: return false
+        return try {
+            activity.startActivity(intent)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
 
     companion object {
+        const val FOCUS = "Focus"
+        const val WORK = "Work"
+        val BUILTIN_PROFILES = linkedSetOf(FOCUS, WORK)
+
+        /** Synthetic dock identity for the Focus profile's clock-app shortcut. */
+        const val TIMER_KEY = "special:timer"
+
         /** Work mode (a focus profile named "Work") sorts work-profile app entries first. */
         fun prioritizeWork(apps: List<AppEntry>, workMode: Boolean): List<AppEntry> =
             if (workMode) apps.sortedByDescending { it.isWork } else apps
@@ -80,9 +187,9 @@ class CommandRouter(
         fun shouldResetChat(idleMillis: Long, hasMessages: Boolean, hasDraft: Boolean, hasPendingQuestion: Boolean): Boolean =
             idleMillis > 30L * 60 * 1000 && hasMessages && !hasDraft && !hasPendingQuestion
 
-        /** Installed-only share targets: drop this launcher and focus-hidden entries, sort by label. */
-        fun shareTargetsOf(resolved: List<Pair<String, String>>, selfPackage: String, hidden: Set<String>): List<Pair<String, String>> =
-            resolved.filter { it.second != selfPackage && it.second !in hidden }.sortedBy { it.first }
+        /** Installed-only share targets: drop this launcher; a profile trims to its allow-list. */
+        fun shareTargetsOf(resolved: List<Pair<String, String>>, selfPackage: String, allowed: Set<String>?): List<Pair<String, String>> =
+            resolved.filter { it.second != selfPackage && (allowed == null || it.second in allowed) }.sortedBy { it.first }
 
         /** Truthful launch failure; a failed work-profile launch never falls back to the personal app. */
         fun launchFailureMessage(app: AppEntry): String =
@@ -100,7 +207,8 @@ class CommandRouter(
     sealed interface Result {
         data class Reply(val text: String) : Result
         data class Launch(val app: AppEntry) : Result
-        data class DraftMessage(val to: String, val text: String, val pkg: String? = null) : Result
+        /** text null = ask what to say first; pkg null = ask which app first. Always a draft. */
+        data class DraftMessage(val to: String, val text: String?, val pkg: String? = null) : Result
         data class UberRide(val dropoff: String) : Result
         /** Duplicate personal/work matches: never silently pick - the user chooses. */
         data class ChooseApp(val apps: List<AppEntry>, val label: String) : Result
@@ -110,13 +218,12 @@ class CommandRouter(
         val input = raw.trim()
         if (input.isEmpty()) return Result.Reply("Say something - an app name, 'focus', or a message to send.")
 
-        // Focus profiles
+        // Profiles
         if (input.equals("focus", true)) {
             val names = profileNames()
             val current = activeProfile
             return Result.Reply(
-                if (names.isEmpty()) "No focus profiles yet - create one in Settings."
-                else "Profiles: ${names.joinToString(", ")}. Active: ${current ?: "none"}. Say 'focus <name>' or 'focus off'."
+                "Profiles: ${names.joinToString(", ")}. Active: ${current ?: "Normal"}. Say 'focus <name>' or 'focus off'."
             )
         }
         if (input.equals("focus off", true)) {
@@ -128,21 +235,19 @@ class CommandRouter(
             val match = profileNames().firstOrNull { it.equals(name, true) }
             return if (match != null) {
                 activeProfile = match
-                val hidden = profileHidden(match)
-                Result.Reply("Focus profile '$match' on. Hidden: ${hidden.joinToString(", ").ifBlank { "nothing" }}")
+                Result.Reply("Profile '$match' on - only its allowed apps can be opened.")
             } else {
-                Result.Reply("No profile called '$name'. Profiles: ${profileNames().joinToString(", ").ifBlank { "none yet - create one in Settings" }}")
+                Result.Reply("No profile called '$name'. Profiles: ${profileNames().joinToString(", ")}")
             }
         }
 
-        // "send this message to X: text" / "send X text via whatsapp"
-        val toMatch = Regex("""(?i)^send\s+(?:this message to\s+)?([A-Za-z][\w .]*?)(?::|\s+via\s+(\w+))\s+(.+)$""").find(input)
-        if (toMatch != null) {
-            val to = toMatch.groupValues[1].trim()
-            val via = toMatch.groupValues[2]
-            val text = toMatch.groupValues[3].trim().trim('"')
-            val pkg = if (via.contains("whats", true)) "com.whatsapp" else null
-            return Result.DraftMessage(to, text, pkg)
+        // Message drafts: deterministic, no AI. Missing text/channel is asked inline.
+        MessageIntents.parse(input)?.let { parsed ->
+            return Result.DraftMessage(parsed.to, parsed.text, parsed.pkg)
+        }
+        // A command-shaped text that didn't parse stays local - never a silent cloud call.
+        if (MessageIntents.looksPrivateAction(input)) {
+            return Result.Reply("I couldn't tell who that's for or what app to use. Try 'send a message to <name> on <app>'.")
         }
 
         // "uber to X" / "ride to X" - opens Uber with the dropoff filled in; the user confirms there.
@@ -162,28 +267,34 @@ class CommandRouter(
 
     fun execute(result: Result): String = when (result) {
         is Result.ChooseApp -> "" // resolved inline by the conversation UI
-        is Result.Launch -> try {
-            val handle = result.app.userHandle
-            if (result.app.isWork && handle != null) {
-                // Work-profile entries must start through LauncherApps; a raw startActivity fails.
-                activity.getSystemService(android.content.pm.LauncherApps::class.java)
-                    .startMainActivity(result.app.launch.component, handle, null, null)
+        is Result.Launch -> {
+            if (result.app.packageName == TIMER_KEY) {
+                if (launchTimer()) "Opening the clock app" else "No clock app on this phone handles timers."
             } else {
-                activity.startActivity(result.app.launch)
+                // "Opening" is a dispatch truth: the OS accepted the open request; whether the
+                // target actually foregrounds is not observable from here.
+                if (launchAppEntry(result.app)) "Opening ${result.app.displayLabel}"
+                else launchFailureMessage(result.app)
             }
-            "Opening ${result.app.displayLabel}"
-        } catch (e: Exception) {
-            launchFailureMessage(result.app)
         }
         is Result.DraftMessage -> {
             val intent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/plain"
-                putExtra(Intent.EXTRA_TEXT, result.text)
+                putExtra(Intent.EXTRA_TEXT, result.text ?: "")
                 if (result.pkg != null) setPackage(result.pkg)
+            }
+            val where = when (result.pkg) {
+                "com.whatsapp" -> "WhatsApp"
+                "org.telegram.messenger" -> "Telegram"
+                "org.thoughtcrime.securesms" -> "Signal"
+                "com.google.android.gm" -> "Gmail"
+                "com.instagram.android" -> "Instagram"
+                null -> "share"
+                else -> "the app"
             }
             try {
                 activity.startActivity(intent)
-                "Draft ready in ${if (result.pkg != null) "WhatsApp" else "share"} for ${result.to} - pick the chat and tap send."
+                "Draft ready in $where for ${result.to} - pick the chat and tap send."
             } catch (e: ActivityNotFoundException) {
                 try {
                     activity.startActivity(Intent.createChooser(Intent(intent).setPackage(null), "Send to ${result.to}"))
