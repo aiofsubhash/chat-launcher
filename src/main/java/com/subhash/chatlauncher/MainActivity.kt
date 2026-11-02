@@ -465,7 +465,8 @@ fun ChatHome(
     val dockApps: List<AppEntry> = run {
         val profile = activeProfile
         if (profile == null) {
-            dockPackages.mapNotNull { key -> allInstalled.firstOrNull { it.identityKey == key } }
+            val keys = router.normalDockKeys(allInstalled.map { it.identityKey }.toSet())
+            keys.mapNotNull { key -> if (key == CommandRouter.TIMER_KEY) timerApp else allInstalled.firstOrNull { it.identityKey == key } }
         } else {
             val allowed = router.effectiveAllowed(profile, workKeys)
             val apps = allInstalled.filter { it.identityKey in allowed }
@@ -512,11 +513,19 @@ fun ChatHome(
         if (text.isNotBlank()) history?.append("assistant", if (fromCloud) "cloud" else "local", text)
     }
 
+    // Pairing progress/result is a transient status banner, not conversation/history chatter.
+    var pairStatus by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(pairMessage) {
         val m = pairMessage
         if (m != null) {
-            messages = messages + ChatMessage(false, m)
+            pairStatus = m
             onPairMessageConsumed()
+        }
+    }
+    LaunchedEffect(pairStatus) {
+        if (pairStatus != null) {
+            delay(8_000)
+            pairStatus = null
         }
     }
 
@@ -577,7 +586,7 @@ fun ChatHome(
     fun askAi(prompt: String) {
         lastActivityAt = System.currentTimeMillis()
         if (!aiAvailable()) {
-            addAssistant("Ask AI needs a connection first - add a key or pairing code in Settings > Account. Nothing was sent.")
+            addAssistant("Ask AI needs a connection first - tap the pairing link you were sent, or see Settings > Account. Nothing was sent.")
             return
         }
         scope.launch {
@@ -652,12 +661,14 @@ fun ChatHome(
             return
         }
         if (result is CommandRouter.Result.Reply && result.text.isEmpty()) {
-            // Local-first: unhandled text is captured, never sent anywhere. Cloud AI is a
-            // separate, explicit, per-message action.
-            addAssistant(
-                "Noted - that's saved in history on this phone. Want me to ask the AI about it? Only this one message would leave the phone.",
-                askAi = raw,
-            )
+            // General conversation goes straight to the AI when connected (owner 22:52) - only
+            // this one message leaves the phone. Unpaired keeps the explicit per-message chip.
+            if (aiAvailable()) {
+                askAi(raw)
+            } else {
+                // Unpaired: explain the connection path - never a silent note or a fake save claim.
+                addAssistant("Ask AI needs a connection first - tap the pairing link you were sent, or see Settings > Account. Nothing was sent.")
+            }
         } else {
             handleResult(result)
         }
@@ -734,10 +745,22 @@ fun ChatHome(
             modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
         )
 
+        if (pairStatus != null) {
+            Text(
+                pairStatus ?: "",
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontFamily = roundedFont,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+            )
+        }
+
         // Notes hold one stable position under the date - visible in every state, no jump
         // when the first message lands. The conversation lives in a bottom-only section
         // that scrolls inside itself; it never takes over the screen.
-        DockRow(Modifier.fillMaxWidth().padding(top = 18.dp))
+        // Date-to-notes gap is 8x the original 18dp per owner voice 21:54.
+        DockRow(Modifier.fillMaxWidth().padding(top = 144.dp))
         if (messages.isEmpty()) {
             Spacer(modifier = Modifier.weight(1f))
         } else {
