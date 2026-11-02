@@ -881,6 +881,34 @@ fun ChatHome(
                         }
                     },
                 )
+                // Query shortcuts (owner 22:53): long typed queries offer one-tap prefill into
+                // ChatGPT / Claude / Google through their documented URL contracts. Prefill
+                // only - the target app opens with the text filled in; the user sends it there.
+                // Owner 21:52: brand logos (not text), bottom left, spaced; shown for queries
+                // of about four-plus words. Tapping opens the destination with the query
+                // prefilled as a DRAFT - the user reviews and sends it there (or Google runs
+                // the search, which the owner asked to execute directly).
+                if (input.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.size >= 4) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        queryShortcutTargets.forEach { target ->
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.tertiaryContainer,
+                                modifier = Modifier.padding(end = 10.dp).clickable {
+                                    keyboardController?.hide()
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(target.urlPrefix + android.net.Uri.encode(input.trim()))))
+                                },
+                            ) {
+                                androidx.compose.material3.Icon(
+                                    painter = androidx.compose.ui.res.painterResource(target.iconRes),
+                                    contentDescription = target.label,
+                                    tint = androidx.compose.ui.graphics.Color.Unspecified,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp).size(20.dp),
+                                )
+                            }
+                        }
+                    }
+                }
                 Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     // Suggestions sit inline left of Send, not above the composer.
                     if (suggestions.isNotEmpty()) {
@@ -1959,6 +1987,17 @@ fun ReasoningInterventionDialog(
 
 
 /** Full app grid overlay (swipe left, Normal mode). */
+data class QueryShortcutTarget(val label: String, val urlPrefix: String, val iconRes: Int)
+
+// Verified prefill contracts (checked Nov 2026): chatgpt.com/?q= fills the composer without
+// sending (OpenAI community + Stack Overflow), claude.ai/new?q= prefills the prompt field
+// (Anthropic support docs), google.com/search?q= runs the search. Only Google executes on open.
+val queryShortcutTargets = listOf(
+    QueryShortcutTarget("ChatGPT", "https://chatgpt.com/?q=", R.drawable.ic_brand_chatgpt),
+    QueryShortcutTarget("Claude", "https://claude.ai/new?q=", R.drawable.ic_brand_claude),
+    QueryShortcutTarget("Google", "https://www.google.com/search?q=", R.drawable.ic_brand_google),
+)
+
 @Composable
 fun AppGridOverlay(apps: List<AppEntry>, fontFamily: androidx.compose.ui.text.font.FontFamily?, onLaunch: (AppEntry) -> Unit, onDismiss: () -> Unit) {
     // Opaque background: the translucent overlay ghosted the home screen beneath it (main 23:28).
