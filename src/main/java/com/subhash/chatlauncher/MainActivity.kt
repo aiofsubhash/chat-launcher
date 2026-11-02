@@ -1961,7 +1961,8 @@ fun ReasoningInterventionDialog(
 /** Full app grid overlay (swipe left, Normal mode). */
 @Composable
 fun AppGridOverlay(apps: List<AppEntry>, fontFamily: androidx.compose.ui.text.font.FontFamily?, onLaunch: (AppEntry) -> Unit, onDismiss: () -> Unit) {
-    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background.copy(alpha = 0.97f)).pointerInput(Unit) {
+    // Opaque background: the translucent overlay ghosted the home screen beneath it (main 23:28).
+    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).pointerInput(Unit) {
         var dragX = 0f
         detectHorizontalDragGestures(
             onDragEnd = { if (dragX >= 80) onDismiss(); dragX = 0f },
@@ -1971,20 +1972,54 @@ fun AppGridOverlay(apps: List<AppEntry>, fontFamily: androidx.compose.ui.text.fo
         Column(modifier = Modifier.fillMaxSize().padding(18.dp)) {
             Text("All apps", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 17.sp, fontFamily = fontFamily, modifier = Modifier.padding(bottom = 12.dp))
             androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-                columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(4),
+                // Adaptive columns keep cells wide enough for full labels on small viewports.
+                columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(minSize = 96.dp),
                 modifier = Modifier.fillMaxSize(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 items(apps.size) { i ->
                     val app = apps[i]
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.clickable { onLaunch(app) }.padding(6.dp),
-                    ) {
-                        StickyNote(app, fontFamily, tilt = 0f, onLaunch = { onLaunch(app) })
-                    }
+                    AppGridCell(app, fontFamily, onLaunch = { onLaunch(app) })
                 }
+            }
+        }
+    }
+}
+
+/** Grid cell: full readable label (wraps to two lines, smaller type), sticky-note styling. */
+@Composable
+fun AppGridCell(app: AppEntry, fontFamily: androidx.compose.ui.text.font.FontFamily?, onLaunch: () -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.94f else 1f, label = "gridCellPress")
+    Box(
+        modifier = Modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                alpha = if (pressed) 0.82f else 1f
+            }
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(interactionSource = interactionSource, indication = null) { onLaunch() },
+    ) {
+        Surface(shape = RoundedCornerShape(6.dp), shadowElevation = 3.dp) {
+            Box(
+                modifier = Modifier.background(
+                    Brush.verticalGradient(listOf(Color(0xFFFCF4BC), Color(0xFFF4E89A)))
+                ).fillMaxWidth(),
+            ) {
+                Text(
+                    app.displayLabel,
+                    color = Color(0xFF5B5340),
+                    fontSize = 12.sp,
+                    lineHeight = 14.sp,
+                    fontFamily = fontFamily,
+                    maxLines = 2,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 10.dp),
+                )
             }
         }
     }
