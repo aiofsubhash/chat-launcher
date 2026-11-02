@@ -1075,7 +1075,7 @@ fun SettingsContent(
     val settingsContext = LocalContext.current
     val roundedFont = remember { RoundedTypeface.load(settingsContext) }
     var tab by rememberSaveable { mutableStateOf(initialSection ?: "home") }
-    val builtins = listOf(CommandRouter.FOCUS, CommandRouter.WORK)
+    val builtins = CommandRouter.BUILTIN_PROFILES.toList()
     val orderedProfiles = builtins.filter { it in profiles } + (profiles - builtins.toSet()).sorted()
 
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -1537,7 +1537,7 @@ fun ReasoningOnboardingDialog(
 ) {
     // decorFitsSystemWindows=false: with the default, the TextField's IME/inset listeners
     // and the dialog window's resizing never settle (composition never idles).
-    Dialog(onDismissRequest = onSkip, properties = DialogProperties(decorFitsSystemWindows = false)) {
+    Dialog(onDismissRequest = onSkip, properties = DialogProperties(decorFitsSystemWindows = false, usePlatformDefaultWidth = false)) {
         ReasoningOnboardingContent(roundedFont = roundedFont, wobbly = wobbly, onDone = onDone, onSkip = onSkip)
     }
 }
