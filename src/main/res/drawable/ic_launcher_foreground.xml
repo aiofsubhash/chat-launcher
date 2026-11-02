@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Approved 23:01 launcher icon foreground: faint wobbly paper grid + plain white
+     composer bar on dark paper. Same jitter hash/amp as the app's PaperGrid. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+        <path android:pathData="M20.50,-4.00 L20.93,7.50 L22.19,19.00 L24.84,30.50 L22.33,42.00 L21.11,53.50 L25.38,65.00 L21.54,76.50 L23.08,88.00 L21.30,99.50 L21.63,111.00" android:strokeColor="#C2BBB5" android:strokeAlpha="0.8" android:strokeWidth="0.6" android:strokeLineCap="round"/>
+        <path android:pathData="M71.21,-4.00 L66.90,7.50 L67.30,19.00 L68.45,30.50 L66.55,42.00 L70.95,53.50 L68.34,65.00 L68.83,76.50 L70.36,88.00 L71.11,99.50 L69.67,111.00" android:strokeColor="#C2BBB5" android:strokeAlpha="0.8" android:strokeWidth="0.6" android:strokeLineCap="round"/>
+        <path android:pathData="M-4.00,22.43 L7.50,23.48 L19.00,24.39 L30.50,24.59 L42.00,25.25 L53.50,21.36 L65.00,20.81 L76.50,20.75 L88.00,24.33 L99.50,20.82 L111.00,22.23" android:strokeColor="#C2BBB5" android:strokeAlpha="0.8" android:strokeWidth="0.6" android:strokeLineCap="round"/>
+        <path android:pathData="M-4.00,67.53 L7.50,66.97 L19.00,68.95 L30.50,71.47 L42.00,71.20 L53.50,70.44 L65.00,68.07 L76.50,70.35 L88.00,67.34 L99.50,68.00 L111.00,67.33" android:strokeColor="#C2BBB5" android:strokeAlpha="0.8" android:strokeWidth="0.6" android:strokeLineCap="round"/>
+    <path android:pathData="M32.5,67.1 L76.9,67.1 A5.8,5.8 0 0 1 82.7,72.89999999999999 L82.7,72.9 A5.8,5.8 0 0 1 76.9,78.7 L32.5,78.7 A5.8,5.8 0 0 1 26.7,72.9 L26.7,72.89999999999999 A5.8,5.8 0 0 1 32.5,67.1 Z" android:fillColor="#FFFFFF"/>
+</vector>
