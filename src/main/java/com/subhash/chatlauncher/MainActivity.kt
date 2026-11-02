@@ -386,6 +386,8 @@ fun ChatHome(
     // Apps the user insisted on this session - no repeated interrogation after that.
     var reasoningBypassed by remember { mutableStateOf(setOf<String>()) }
     val suggestions = remember(input, activeProfile) { if (input.isBlank()) emptyList() else resolveApps(input) }
+    val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
 
     // Dock: no profile = the user's chosen apps; a profile shows exactly its allow-list
     // (Timer first in Focus; work entries first in Work).
@@ -478,6 +480,8 @@ fun ChatHome(
                 "I see more than one '${result.label}' here - which one?",
                 choiceApps = result.apps,
                 onChoice = { app ->
+                    keyboardController?.hide()
+                    focusManager.clearFocus()
                     if (activeProfile == CommandRouter.REASONING && app.identityKey !in reasoningBypassed) {
                         reasoningIntervention = app
                     } else {
@@ -544,11 +548,23 @@ fun ChatHome(
             addUser(raw)
             reasoningIntervention = null
             reasoningBypassed = reasoningBypassed + pause.identityKey
+            keyboardController?.hide()
+            focusManager.clearFocus()
             addAssistant(router.execute(CommandRouter.Result.Launch(pause)))
             return
         }
         addUser(raw)
         val result = router.route(raw, suggestions)
+        // A dispatched command leaves the app or opens a dialog/chooser: drop the keyboard so
+        // the launcher never sits behind a stuck IME (device report: "Opening Instagram" with
+        // the keyboard up indefinitely). Drafts still asking for their body keep it.
+        if (result is CommandRouter.Result.Launch || result is CommandRouter.Result.UberRide ||
+            result is CommandRouter.Result.ChooseApp ||
+            (result is CommandRouter.Result.DraftMessage && result.text != null)
+        ) {
+            keyboardController?.hide()
+            focusManager.clearFocus()
+        }
         // Reasoning also gates typed launches: naming an entertainment app is not yet a
         // reason - the same pause applies as for a dock tap.
         if (result is CommandRouter.Result.Launch &&
@@ -589,9 +605,15 @@ fun ChatHome(
                     lastActivityAt = System.currentTimeMillis()
                     if (activeProfile == CommandRouter.REASONING && app.identityKey !in reasoningBypassed) {
                         // Reasoning asks why first; "Just open it" always opens immediately.
+                        keyboardController?.hide()
+                        focusManager.clearFocus()
                         reasoningIntervention = app
-                    } else if (!launchApp(app)) {
-                        addAssistant(if (app.packageName == CommandRouter.TIMER_KEY) "No clock app on this phone handles timers." else CommandRouter.launchFailureMessage(app))
+                    } else {
+                        keyboardController?.hide()
+                        focusManager.clearFocus()
+                        if (!launchApp(app)) {
+                            addAssistant(if (app.packageName == CommandRouter.TIMER_KEY) "No clock app on this phone handles timers." else CommandRouter.launchFailureMessage(app))
+                        }
                     }
                 })
             }
@@ -686,7 +708,7 @@ fun ChatHome(
                                         color = MaterialTheme.colorScheme.secondaryContainer,
                                         modifier = Modifier.fillMaxWidth().clickable {
                                             lastActivityAt = System.currentTimeMillis()
-                                            (msg.onChoice ?: { a -> launchApp(a) })(app)
+                                            (msg.onChoice ?: { a -> keyboardController?.hide(); focusManager.clearFocus(); launchApp(a) })(app)
                                         },
                                     ) {
                                         val dup = msg.choiceApps.groupBy { it.label }.any { it.value.size > 1 }
@@ -742,6 +764,8 @@ fun ChatHome(
                                     modifier = Modifier
                                         .padding(end = 8.dp)
                                         .clickable {
+                                            keyboardController?.hide()
+                                            focusManager.clearFocus()
                                             if (!launchApp(app)) {
                                                 addAssistant(CommandRouter.launchFailureMessage(app))
                                             }
@@ -1036,6 +1060,9 @@ fun OptionText(
     onClick: () -> Unit,
     font: androidx.compose.ui.text.font.FontFamily?,
     fontSize: androidx.compose.ui.unit.TextUnit = 16.sp,
+    modifier: Modifier = Modifier,
+    textAlign: TextAlign? = null,
+    horizontalPadding: androidx.compose.ui.unit.Dp = 10.dp,
 ) {
     Text(
         label,
@@ -1043,10 +1070,13 @@ fun OptionText(
         fontSize = fontSize,
         fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
         color = if (selected) accentText else MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier
+        maxLines = 1,
+        softWrap = false,
+        textAlign = textAlign,
+        modifier = modifier
             .clip(RoundedCornerShape(8.dp))
             .clickable { onClick() }
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(horizontal = horizontalPadding, vertical = 10.dp),
     )
 }
 
@@ -1102,9 +1132,11 @@ fun SettingsContent(
             initiallyOpen = switcherInitiallyOpen,
         )
         Row(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+            // Equal-weight, single-line tabs: "Account" must never wrap or clip, even at 320dp.
             listOf("home" to "Home", "history" to "History", "context" to "Context", "account" to "Account").forEachIndexed { i, (id, label) ->
                 if (i > 0) Spacer(Modifier.width(6.dp))
-                OptionText(label, selected = tab == id, onClick = { tab = id }, font = roundedFont, fontSize = 17.sp)
+                OptionText(label, selected = tab == id, onClick = { tab = id }, font = roundedFont, fontSize = 14.sp,
+                    modifier = Modifier.weight(1f), textAlign = TextAlign.Center, horizontalPadding = 4.dp)
             }
         }
         WobblyDivider()
@@ -1571,6 +1603,9 @@ fun ReasoningOnboardingContent(
     Surface(
             shape = RoundedCornerShape(18.dp),
             color = MaterialTheme.colorScheme.background,
+            // Visible edge: the card must read as a card over the home backdrop in both themes.
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)),
+            shadowElevation = 8.dp,
             modifier = Modifier
                 .fillMaxWidth(0.92f)
                 // The 70-80% popup the user asked for. Bounded, and safe now that the
@@ -1578,7 +1613,8 @@ fun ReasoningOnboardingContent(
                 .heightIn(
                     min = (LocalConfiguration.current.screenHeightDp * 0.7f).dp,
                     max = (LocalConfiguration.current.screenHeightDp * 0.78f).dp,
-                ),
+                )
+                .testTag("reasoning_onboarding_card"),
         ) {
             Box {
                 PaperGrid(Modifier.matchParentSize(), wobbly = wobbly)
@@ -1651,7 +1687,9 @@ fun ReasoningInterventionDialog(
         Surface(
             shape = RoundedCornerShape(18.dp),
             color = MaterialTheme.colorScheme.background,
-            modifier = Modifier.fillMaxWidth(0.92f).wrapContentHeight(),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)),
+            shadowElevation = 8.dp,
+            modifier = Modifier.fillMaxWidth(0.92f).wrapContentHeight().testTag("reasoning_intervention_card"),
         ) {
             Box {
                 PaperGrid(Modifier.matchParentSize(), wobbly = wobbly)
