@@ -26,6 +26,8 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.assertIsDisplayed
@@ -742,6 +744,20 @@ class ChatHomeScreenshotTest {
         composeRule.onNodeWithText("note buy milk").performImeAction()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("Noted - saved on this phone: buy milk").assertExists()
+    }
+
+    /** Owner 22:53: swipe left opens the full app grid in Normal mode. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun swipeLeftOpensAppGrid() {
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("a")
+        composeRule.onNodeWithText("a").performTextClearance()
+        composeRule.waitForIdle()
+        composeRule.onRoot().performTouchInput { swipeLeft() }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("All apps").assertExists()
+        composeRule.onNodeWithText("WhatsApp").assertExists()
     }
 
     /** Long-press a suggestion chip: App info opens the OS app-details page for that package. */
