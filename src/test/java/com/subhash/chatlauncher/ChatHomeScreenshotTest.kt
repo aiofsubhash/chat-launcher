@@ -557,9 +557,24 @@ class ChatHomeScreenshotTest {
         composeRule.waitForIdle()
         // The real Dialog wrapper (not just its content) must open and stay interactive.
         composeRule.onNodeWithText("What do you want more time for?").assertExists()
-        composeRule.onNodeWithText("Skip for now").performClick()
+        // Answer entry must actually function inside the dialog: answer all four, Done persists.
+        composeRule.onNodeWithText("Your answer").performTextInput("my family")
+        composeRule.onNodeWithText("Next").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("What do you want more time for?").assertDoesNotExist()
+        composeRule.onNodeWithText("What does your phone get in the way of?").assertExists()
+        composeRule.onNodeWithText("Your answer").performTextInput("doomscrolling")
+        composeRule.onNodeWithText("Next").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Your answer").performTextInput("boredom")
+        composeRule.onNodeWithText("Next").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Your answer").performTextInput("reading")
+        composeRule.onNodeWithText("Done").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("What would you rather be doing instead?").assertDoesNotExist()
+        val saved = ctx.getString("entries", null) ?: ""
+        org.junit.Assert.assertTrue("typed answers saved locally, got: " + saved.take(160),
+            saved.contains("my family") && saved.contains("reading"))
     }
 
     /** Reasoning onboarding: grid-background popup dialog with the first question. */
