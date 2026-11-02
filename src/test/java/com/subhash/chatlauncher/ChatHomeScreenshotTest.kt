@@ -486,26 +486,19 @@ class ChatHomeScreenshotTest {
             .putString("active_profile", "Reasoning")
             .putStringSet("profile_allow_Reasoning", setOf("com.instagram.android"))
             .commit()
-        installFakeApp("com.instagram.android", "Instagram")
+        // Instagram comes from the @Before fixture; registering it again would duplicate
+        // the PM entry and route() would (correctly) refuse a two-way "match" as a note.
         composeRule.activityRule.scenario.recreate()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("write what you want to do").performTextInput("insta")
         composeRule.onNodeWithText("Send").performClick()
         composeRule.waitForIdle()
-        composeRule.onRoot().printToLog("TYPEDGATE")
+        // No launch yet - the pause dialog appears instead.
+        composeRule.onNodeWithText("Just open it").assertExists()
         org.junit.Assert.assertNull(
             "typed command must not launch before the pause",
             Shadows.shadowOf(composeRule.activity).nextStartedActivity
         )
-        // No launch yet - the pause dialog appears instead.
-        try {
-            composeRule.onNodeWithText("Just open it").assertExists()
-        } catch (e: AssertionError) {
-            val prop = androidx.compose.ui.semantics.SemanticsProperties.Text
-            val texts = composeRule.onAllNodes(androidx.compose.ui.test.isRoot().not(), useUnmergedTree = true)
-                .fetchSemanticsNodes().mapNotNull { n -> if (n.config.contains(prop)) n.config[prop].joinToString(" ") { it.text } else null }
-            throw AssertionError("pause dialog missing; visible texts: " + texts.joinToString(" | ").take(600), e)
-        }
         // Typed override honors immediately.
         composeRule.onNodeWithText("write what you want to do").performTextInput("just open it")
         composeRule.onNodeWithText("Send").performClick()
@@ -524,6 +517,25 @@ class ChatHomeScreenshotTest {
         )
         prefs.edit().remove("active_profile").remove("profile_allow_Reasoning").commit()
     }
+    /** Live-wrapper behavior: typed activation opens the real onboarding dialog; Skip closes it. */
+    @Test
+    fun reasoningOnboardingLiveWrapper() {
+        // Fail fast: the default 60s idle timeout makes every loop-hypothesis cycle a minute.
+        androidx.test.espresso.IdlingPolicies.setMasterPolicyTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        androidx.test.espresso.IdlingPolicies.setIdlingResourceTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        val ctx = composeRule.activity.getSharedPreferences("user_context_prefs", android.content.Context.MODE_PRIVATE)
+        ctx.edit().clear().commit()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("focus reasoning")
+        composeRule.onNodeWithText("Send").performClick()
+        composeRule.waitForIdle()
+        // The real Dialog wrapper (not just its content) must open and stay interactive.
+        composeRule.onNodeWithText("What do you want more time for?").assertExists()
+        composeRule.onNodeWithText("Skip for now").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("What do you want more time for?").assertDoesNotExist()
+    }
+
     /** Reasoning onboarding: grid-background popup dialog with the first question. */
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
