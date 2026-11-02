@@ -760,6 +760,34 @@ class ChatHomeScreenshotTest {
         composeRule.onRoot().captureRoboImage()
     }
 
+    /** Grid readability gate (main 23:28): dark theme. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun appGridOverlayDark() {
+        val prefs = ApplicationProvider.getApplicationContext<android.content.Context>().getSharedPreferences("chat_launcher", 0)
+        prefs.edit().remove("active_profile").putString("theme_mode", "dark").commit()
+        composeRule.activityRule.scenario.recreate()
+        composeRule.waitForIdle()
+        composeRule.onRoot().performTouchInput { swipeLeft() }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("All apps").assertExists()
+        composeRule.onRoot().captureRoboImage()
+        prefs.edit().remove("theme_mode").commit()
+    }
+
+    /** Grid readability gate (main 23:28): small viewport. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w320dp-h520dp-xhdpi")
+    fun appGridOverlaySmallViewport() {
+        ApplicationProvider.getApplicationContext<android.content.Context>().getSharedPreferences("chat_launcher", 0).edit().remove("active_profile").commit()
+        composeRule.activityRule.scenario.recreate()
+        composeRule.waitForIdle()
+        composeRule.onRoot().performTouchInput { swipeLeft() }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("All apps").assertExists()
+        composeRule.onRoot().captureRoboImage()
+    }
+
     /** Owner 22:53: swipe left opens the full app grid in Normal mode. */
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
