@@ -37,6 +37,9 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotFocused
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.core.app.ApplicationProvider
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -522,6 +525,8 @@ class ChatHomeScreenshotTest {
         composeRule.onNodeWithText("Instagram").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("Just open it").assertExists()
+        // The pause is the REAL dialog card (tagged Surface in a second window), not inline text.
+        composeRule.onNodeWithTag("reasoning_intervention_card").assertExists()
         // Dialogs live in a second window root: capture the whole screen (home + dialog).
         captureScreenRoboImage()
         composeRule.onNodeWithTag("reasoning_open_anyway", useUnmergedTree = true).performClick()
@@ -606,17 +611,131 @@ class ChatHomeScreenshotTest {
             saved.contains("my family") && saved.contains("reading"))
     }
 
-    /** Reasoning onboarding: grid-background popup dialog with the first question. */
+    /** Reasoning onboarding over the REAL home via the REAL typed path: the capture includes
+     *  the home backdrop + the live dialog window, and the card bounds are asserted against
+     *  the 70-80% popup spec (not an isolated content fixture). */
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
     fun reasoningOnboarding() {
-        composeRule.activity.setContent {
-            MaterialTheme(colorScheme = calmColors) {
-                ReasoningOnboardingContent(roundedFont = null, wobbly = true, onDone = {}, onSkip = {})
-            }
-        }
+        androidx.test.espresso.IdlingPolicies.setMasterPolicyTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        androidx.test.espresso.IdlingPolicies.setIdlingResourceTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        val ctx = composeRule.activity.getSharedPreferences("user_context_prefs", android.content.Context.MODE_PRIVATE)
+        ctx.edit().clear().commit()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("focus reasoning")
+        composeRule.onNodeWithText("Send").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("What do you want more time for?").assertExists()
+        val card = composeRule.onNodeWithTag("reasoning_onboarding_card").getUnclippedBoundsInRoot()
+        val cfg = composeRule.activity.resources.configuration
+        val sw = cfg.screenWidthDp.toFloat()
+        val sh = cfg.screenHeightDp.toFloat()
+        val cardW = (card.right - card.left).value
+        val cardH = (card.bottom - card.top).value
+        org.junit.Assert.assertTrue(
+            "onboarding width ~92% of screen, got ${cardW}dp of ${sw}dp",
+            cardW > sw * 0.86f && cardW < sw * 0.97f,
+        )
+        org.junit.Assert.assertTrue(
+            "onboarding height within the 70-80% popup spec, got ${cardH}dp of ${sh}dp",
+            cardH > sh * 0.70f && cardH < sh * 0.79f,
+        )
+        // Dialogs live in a second window root: capture the whole screen (home + dialog).
+        captureScreenRoboImage()
+        ctx.edit().clear().commit()
+    }
+
+    /** Device report regression: typed 'insta' + Send must dispatch AND drop the keyboard/focus,
+     *  so the launcher never sits behind a stuck IME saying "Opening Instagram" forever. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun typedInstaLaunchDismissesKeyboard() {
+        composeRule.waitForIdle()
+        val field = composeRule.onNode(hasSetTextAction())
+        field.performTextInput("insta")
+        field.assertIsFocused()
+        composeRule.onNodeWithText("Send").performClick()
+        composeRule.waitForIdle()
+        val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
+        org.junit.Assert.assertNotNull("typed 'insta' dispatches the launch", started)
+        org.junit.Assert.assertEquals("com.instagram.android", started.component?.packageName)
+        composeRule.onNodeWithText("Opening Instagram").assertExists()
+        field.assertIsNotFocused()
+    }
+
+    /** Honest terminal failure: a launch the OS rejects returns a clear "Couldn't open" message,
+     *  never a stuck "Opening" note, and nothing is dispatched. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun typedLaunchFailureIsHonest() {
+        // Ghost entry routed through LauncherApps (work-profile path): Robolectric does not
+        // shadow LauncherApps.startMainActivity, so the dead component genuinely throws here,
+        // exercising the same catch -> honest failure the device path relies on.
+        val ghost = AppEntry(
+            "Ghost", "com.ghost.app",
+            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                .setComponent(android.content.ComponentName("com.ghost.app", "com.ghost.app.Main")),
+            isWork = true,
+            userHandle = android.os.Process.myUserHandle(),
+        )
+        val prefs = composeRule.activity.getSharedPreferences("chat_launcher", android.content.Context.MODE_PRIVATE)
+        val router = CommandRouter(composeRule.activity, prefs)
+        org.junit.Assert.assertFalse("ghost launch must report failure", router.launchAppEntry(ghost))
+        val msg = router.execute(CommandRouter.Result.Launch(ghost))
+        org.junit.Assert.assertTrue(
+            "failure must be an honest terminal message, got: $msg",
+            msg.startsWith("Couldn't open 💼 Ghost"),
+        )
+        org.junit.Assert.assertNull(
+            "a failed launch must not record a dispatch",
+            Shadows.shadowOf(composeRule.activity).nextStartedActivity,
+        )
+        // The personal-path catch is identical: a throwing startActivity also maps to the
+        // honest message, never a stuck "Opening".
+        org.junit.Assert.assertEquals(CommandRouter.launchFailureMessage(ghost), msg)
+    }
+
+    /** Bounded terminal state: after a dispatch, leaving and returning keeps the finished
+     *  exchange, an empty composer, and no pending chooser/question. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun launchTerminalStateSurvivesBackground() {
+        composeRule.waitForIdle()
+        composeRule.onNode(hasSetTextAction()).performTextInput("insta")
+        composeRule.onNodeWithText("Send").performClick()
+        composeRule.waitForIdle()
+        org.junit.Assert.assertNotNull(Shadows.shadowOf(composeRule.activity).nextStartedActivity)
+        composeRule.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
+        composeRule.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Opening Instagram").assertExists()
+        composeRule.onNodeWithText("write what you want to do").assertExists()
+        composeRule.onNodeWithText("which one?", substring = true).assertDoesNotExist()
+    }
+
+    /** Settings tabs never wrap or clip on a narrow phone, light theme. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w320dp-h700dp-xxhdpi")
+    fun settingsTabsNarrowLight() = assertTabsSingleLine(dark = false)
+
+    /** Settings tabs never wrap or clip on a narrow phone, dark theme. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w320dp-h700dp-xxhdpi")
+    fun settingsTabsNarrowDark() = assertTabsSingleLine(dark = true)
+
+    private fun assertTabsSingleLine(dark: Boolean) {
+        settingsPageContent(dark = dark)
+        composeRule.waitForIdle()
+        val root = composeRule.onRoot().getUnclippedBoundsInRoot()
+        var lineHeight = -1f
+        for (label in listOf("Home", "History", "Context", "Account")) {
+            val b = composeRule.onNodeWithText(label).getUnclippedBoundsInRoot()
+            org.junit.Assert.assertTrue("$label clipped offscreen: $b vs $root", b.right <= root.right && b.left >= root.left)
+            val h = (b.bottom - b.top).value
+            if (lineHeight < 0f) lineHeight = h else org.junit.Assert.assertEquals(
+                "$label wrapped to a second line", lineHeight, h, 1f,
+            )
+        }
         composeRule.onRoot().captureRoboImage()
     }
 
