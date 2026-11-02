@@ -735,6 +735,10 @@ fun ChatHome(
             onHorizontalDrag = { _, dragAmount -> dragX += dragAmount },
         )
     })
+    // Small available height (IME open, tiny viewport): collapse the owner-mandated 8x
+    // date-to-notes gap so the composer and Send stay fully visible (00:08 render showed the
+    // Send label clipped at h420dp). Normal heights keep the full 144dp gap (owner 21:54).
+    val tightHeight = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp < 560
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp)) {
         // Top bar: Fresh chat left, settings right
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -785,7 +789,7 @@ fun ChatHome(
         // when the first message lands. The conversation lives in a bottom-only section
         // that scrolls inside itself; it never takes over the screen.
         // Date-to-notes gap is 8x the original 18dp per owner voice 21:54.
-        DockRow(Modifier.fillMaxWidth().padding(top = 144.dp))
+        DockRow(Modifier.fillMaxWidth().padding(top = if (tightHeight) 16.dp else 144.dp))
         if (messages.isEmpty()) {
             Spacer(modifier = Modifier.weight(1f))
         } else {
