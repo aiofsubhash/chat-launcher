@@ -105,6 +105,12 @@ object MessageIntents {
      * True when the text reads like a messaging/action command. Used to keep FAILED parses
      * local: the app asks a clarifying question instead of sending private text to a cloud AI.
      */
+    /** Explicit note intent only (owner 22:52): open text is conversation, notes are on request. */
+    private val NOTE_INTENT = Regex("""(?i)^(?:note(?:\s+this)?|take\s+a\s+note|save\s+a\s+note|save\s+this|remember\s+this|jot\s+(?:this\s+)?down|write\s+this\s+down)\s*[:\-]?\s+(.+)$""")
+
+    fun parseNote(raw: String): String? =
+        NOTE_INTENT.find(raw.trim())?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() }
+
     fun looksPrivateAction(raw: String): Boolean =
         Regex("""(?i)^(?:let'?s\s+|please\s+|hey\s*,?\s+)*(?:send|message|text|write|whatsapp|telegram|email|mail|call)\b""")
             .containsMatchIn(raw.trim())
