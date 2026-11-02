@@ -97,7 +97,10 @@ object LlmClient {
 
     /** Connect AI proxy: same OpenAI-compatible shape, server-fixed free model upstream. */
     private suspend fun chatProxyStream(endpointUrl: String, credential: String, model: String, history: List<Pair<String, String>>, onDelta: suspend (String) -> Unit): String {
-        val body = JSONObject(openRouterBody(model, history)).put("stream", true).toString()
+        // Proxy contract: exactly ONE current user message - no system scaffold, no history
+        // (device 400 'expected exactly one message' 22:51). The server fixes the model upstream.
+        val userText = history.lastOrNull { it.first == "user" }?.second.orEmpty()
+        val body = JSONObject(proxyBody(model, userText)).put("stream", true).toString()
         val conn = (URL(endpointUrl).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 15_000
@@ -110,7 +113,7 @@ object LlmClient {
         val code = conn.responseCode
         if (code !in 200..299) {
             val err = conn.errorStream?.bufferedReader()?.readText() ?: ""
-            return "API error $code: ${err.take(200)}"
+            return proxyErrorMessage(code, err)
         }
         val sb = StringBuilder()
         val reader = conn.inputStream.bufferedReader()
@@ -144,6 +147,20 @@ object LlmClient {
                 Provider.ANTHROPIC -> chatAnthropic(apiKey, model, history)
             }
         }
+
+    /** Connect AI proxy body: the current user message only - never history, never a system prompt. */
+    internal fun proxyBody(model: String, userText: String): String =
+        JSONObject()
+            .put("model", model)
+            .put("max_tokens", 1024)
+            .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", userText)))
+            .toString()
+
+    /** Clean error line for the UI - never a raw server JSON dump. */
+    internal fun proxyErrorMessage(code: Int, errBody: String): String {
+        val detail = try { JSONObject(errBody).getJSONObject("error").optString("message") } catch (e: Exception) { "" }
+        return if (detail.isNotBlank()) "The AI couldn't answer (error $code) - $detail" else "The AI couldn't answer (error $code)."
+    }
 
     /** Request body for OpenRouter. max_price 0/0 makes OpenRouter itself refuse non-free routing - provider-side fail-closed, independent of the local gate. */
     internal fun openRouterBody(model: String, history: List<Pair<String, String>>): String {
