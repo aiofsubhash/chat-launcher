@@ -308,7 +308,7 @@ class ChatHomeScreenshotTest {
         composeRule.onRoot().captureRoboImage()
     }
 
-    private fun settingsPageContent(switcherOpen: Boolean = false, section: String? = null, pickerOpen: Boolean = false, editing: String? = null, editorOpen: Boolean = false, dark: Boolean = false, historyEntries: List<HistoryEntry> = emptyList()) {
+    private fun settingsPageContent(switcherOpen: Boolean = false, section: String? = null, pickerOpen: Boolean = false, editing: String? = null, editorOpen: Boolean = false, dark: Boolean = false, advancedOpen: Boolean = false, historyEntries: List<HistoryEntry> = emptyList()) {
         val apps = listOf(
             AppEntry("WhatsApp", "com.whatsapp", Intent()),
             AppEntry("Chrome", "com.android.chrome", Intent()),
@@ -338,6 +338,7 @@ class ChatHomeScreenshotTest {
                     switcherInitiallyOpen = switcherOpen,
                     pickerInitiallyOpen = pickerOpen,
                     editorInitiallyOpen = editorOpen,
+                    advancedInitiallyOpen = advancedOpen,
                     initialSection = section,
                 )
             }
@@ -382,6 +383,15 @@ class ChatHomeScreenshotTest {
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
     fun settingsPageAccount() {
         settingsPageContent(section = "account")
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Account tab with the advanced manual-key section expanded. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsPageAccountAdvanced() {
+        settingsPageContent(section = "account", advancedOpen = true)
         composeRule.waitForIdle()
         composeRule.onRoot().captureRoboImage()
     }
