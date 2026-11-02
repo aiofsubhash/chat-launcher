@@ -467,11 +467,9 @@ class ChatHomeScreenshotTest {
         composeRule.onNodeWithText("write what you want to do").performTextInput("what's a good birthday gift for my dad")
         composeRule.onNodeWithText("Send").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Ask AI").assertExists()
-        composeRule.onNodeWithText("Ask AI").performClick()
-        composeRule.waitForIdle()
-        // No connection configured: local guidance, nothing sent.
-        composeRule.onNodeWithText("Ask AI needs a connection first - add a key or pairing code in Settings > Account. Nothing was sent.").assertExists()
+        // Unpaired open text goes straight to connection guidance (owner 22:52/main 23:01) -
+        // no note chip, nothing sent.
+        composeRule.onNodeWithText("Ask AI needs a connection first - tap the pairing link you were sent, or see Settings > Account. Nothing was sent.").assertExists()
         composeRule.onRoot().captureRoboImage()
     }
 
@@ -690,6 +688,60 @@ class ChatHomeScreenshotTest {
         val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
         org.junit.Assert.assertNotNull("typed 'settings' dispatches the launch", started)
         org.junit.Assert.assertEquals("com.android.settings", started.component?.packageName)
+    }
+
+    /** Device bug 22:48: exact typed 'whatsapp' + Enter launches the app, never the
+     *  message-recipient clarification. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun whatsappTypedEnterLaunchesApp() {
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("whatsapp")
+        composeRule.onNodeWithText("whatsapp").performImeAction()
+        composeRule.waitForIdle()
+        val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
+        org.junit.Assert.assertNotNull("typed 'whatsapp' dispatches the launch", started)
+        org.junit.Assert.assertEquals("com.whatsapp", started.component?.packageName)
+    }
+
+    /** Owner 22:52/main 23:01: unpaired open text gets connection guidance - never a
+     *  silent note or a fake "saved" claim. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun unpairedOpenTextGetsConnectionGuidance() {
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("what's up")
+        composeRule.onNodeWithText("what's up").performImeAction()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Ask AI needs a connection first - tap the pairing link you were sent, or see Settings > Account. Nothing was sent.").assertExists()
+        composeRule.onNodeWithText("Noted - that's saved in history on this phone.", substring = true).assertDoesNotExist()
+    }
+
+    /** Device bug 22:53 mitigation: stored dock keys that no longer resolve fall back to
+     *  defaults - Normal mode never shows a blank dock by accident. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun normalDockFallsBackWhenStoredKeysStale() {
+        val p = ApplicationProvider.getApplicationContext<android.content.Context>().getSharedPreferences("chat_launcher", 0)
+        p.edit().putString("dock_apps", "com.ghost.app").commit()
+        composeRule.waitForIdle()
+        // Fake apps install in @Before; poke the composer once so the dock recomputes with them.
+        composeRule.onNodeWithText("write what you want to do").performTextInput("a")
+        composeRule.onNodeWithText("a").performTextClearance()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Maps").assertExists()
+        composeRule.onNodeWithText("Chrome").assertExists()
+    }
+
+    /** Owner 22:52: explicit note intent saves locally, never a cloud call. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun explicitNoteSavesLocally() {
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("note buy milk")
+        composeRule.onNodeWithText("note buy milk").performImeAction()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Noted - saved on this phone: buy milk").assertExists()
     }
 
     /** Long-press a suggestion chip: App info opens the OS app-details page for that package. */
