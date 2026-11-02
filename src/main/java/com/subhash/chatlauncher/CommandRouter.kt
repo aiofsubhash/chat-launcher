@@ -258,10 +258,15 @@ class CommandRouter(
         }
 
         // App launch: a single exact match wins; duplicate personal/work entries always ask.
-        val exactMatches = suggestions.filter { it.label.equals(input, true) || it.packageName.equals(input, true) }
+        // Dedupe by identity first - the same package registered twice is one app, not a choice.
+        val distinct = suggestions.distinctBy { it.identityKey }
+        val exactMatches = distinct.filter { it.label.equals(input, true) || it.packageName.equals(input, true) }
         if (exactMatches.size > 1) return Result.ChooseApp(exactMatches, input)
         if (exactMatches.size == 1) return Result.Launch(exactMatches.first())
-        if (suggestions.size == 1) return Result.Launch(suggestions.first())
+        if (distinct.size == 1) return Result.Launch(distinct.first())
+        // Multiple matches for a partial name (e.g. personal + work Instagram): never a
+        // silent pick, never a note - an explicit local chooser.
+        if (distinct.size > 1) return Result.ChooseApp(distinct, input)
 
         return Result.Reply("")
     }
