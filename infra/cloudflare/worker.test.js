@@ -267,3 +267,6 @@ test('pair redeem atomic single use + installed auth + invalid/expiry/rate limit
 
 
 test('malformed pairing JSON is400',async()=>{const env=makeEnv();const r=await redeem(new Request('https://proxy.test/v1/pair/redeem',{method:'POST',body:'{'}),env);assert.equal(r.status,400);});
+
+
+test('pair landing no enrollment or secret query and strict policy',async()=>{const w=(await import('./worker.js')).default;const r=await w.fetch(new Request('https://proxy.test/pair'),makeEnv(),{});assert.equal(r.status,200);assert.equal(r.headers.get('Referrer-Policy'),'no-referrer');assert.equal(r.headers.get('Cache-Control'),'no-store');const b=await r.text();assert.ok(b.includes('location.hash'));assert.ok(!b.includes('fetch('));assert.ok(!b.includes('https://'));assert.ok(r.headers.get('Content-Security-Policy').includes("default-src 'none'"));});
