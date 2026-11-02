@@ -365,6 +365,8 @@ fun ChatHome(
     val userContext = userContextStore ?: remember { UserContextStore(context) }
     var showReasoningOnboarding by remember { mutableStateOf(false) }
     var reasoningIntervention by remember { mutableStateOf<AppEntry?>(null) }
+    // Apps the user insisted on this session - no repeated interrogation after that.
+    var reasoningBypassed by remember { mutableStateOf(setOf<String>()) }
     val suggestions = remember(input, activeProfile) { if (input.isBlank()) emptyList() else resolveApps(input) }
 
     // Dock: no profile = the user's chosen apps; a profile shows exactly its allow-list
@@ -453,7 +455,13 @@ fun ChatHome(
             is CommandRouter.Result.ChooseApp -> addAssistant(
                 "I see more than one '${result.label}' here - which one?",
                 choiceApps = result.apps,
-                onChoice = { app -> addAssistant(router.execute(CommandRouter.Result.Launch(app))) },
+                onChoice = { app ->
+                    if (activeProfile == CommandRouter.REASONING && app.identityKey !in reasoningBypassed) {
+                        reasoningIntervention = app
+                    } else {
+                        addAssistant(router.execute(CommandRouter.Result.Launch(app)))
+                    }
+                },
             )
             else -> {
                 val note = router.execute(result)
@@ -506,8 +514,28 @@ fun ChatHome(
             handleDraft(CommandRouter.Result.DraftMessage(pending.first, raw, pending.second))
             return
         }
+        // Typed override: "just open it" (or close variants) ends the pause immediately,
+        // for this app and this session.
+        val pause = reasoningIntervention
+        if (pause != null && raw.trim().lowercase().replace(Regex("[^a-z ]"), "").let {
+                it == "just open it" || it == "open it" || it == "just open" }) {
+            addUser(raw)
+            reasoningIntervention = null
+            reasoningBypassed = reasoningBypassed + pause.identityKey
+            addAssistant(router.execute(CommandRouter.Result.Launch(pause)))
+            return
+        }
         addUser(raw)
         val result = router.route(raw, suggestions)
+        // Reasoning also gates typed launches: naming an entertainment app is not yet a
+        // reason - the same pause applies as for a dock tap.
+        if (result is CommandRouter.Result.Launch &&
+            activeProfile == CommandRouter.REASONING &&
+            result.app.identityKey !in reasoningBypassed
+        ) {
+            reasoningIntervention = result.app
+            return
+        }
         if (result is CommandRouter.Result.Reply && result.text.isEmpty()) {
             // Local-first: unhandled text is captured, never sent anywhere. Cloud AI is a
             // separate, explicit, per-message action.
@@ -517,6 +545,12 @@ fun ChatHome(
             )
         } else {
             handleResult(result)
+        }
+    }
+
+    fun launchReasoningApp(app: AppEntry) {
+        if (!launchApp(app)) {
+            addAssistant(if (app.packageName == CommandRouter.TIMER_KEY) "No clock app on this phone handles timers." else CommandRouter.launchFailureMessage(app))
         }
     }
 
@@ -531,7 +565,7 @@ fun ChatHome(
             dockApps.forEachIndexed { i, app ->
                 StickyNote(app, roundedFont, tilt = tilts[i % tilts.size], onLaunch = {
                     lastActivityAt = System.currentTimeMillis()
-                    if (activeProfile == CommandRouter.REASONING) {
+                    if (activeProfile == CommandRouter.REASONING && app.identityKey !in reasoningBypassed) {
                         // Reasoning asks why first; "Just open it" always opens immediately.
                         reasoningIntervention = app
                     } else if (!launchApp(app)) {
@@ -759,9 +793,8 @@ fun ChatHome(
             wobbly = gridWobbly,
             onOpen = {
                 reasoningIntervention = null
-                if (!launchApp(app)) {
-                    addAssistant(if (app.packageName == CommandRouter.TIMER_KEY) "No clock app on this phone handles timers." else CommandRouter.launchFailureMessage(app))
-                }
+                reasoningBypassed = reasoningBypassed + app.identityKey
+                launchReasoningApp(app)
             },
             onLater = { reasoningIntervention = null },
         )
