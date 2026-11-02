@@ -264,3 +264,6 @@ test('pair redeem atomic single use + installed auth + invalid/expiry/rate limit
  setFetch(async()=>sseResponse());const chat=await handleRequest(makeReq({headers:{'X-Tester-Token':out.credential}}),env,{},FIXED_NOW);assert.equal(chat.status,200);await chat.text();
  for(let i=0;i<9;i++)await redeem(req(),env);assert.equal((await redeem(req(),env)).status,429);
 });
+
+
+test('malformed pairing JSON is400',async()=>{const env=makeEnv();const r=await redeem(new Request('https://proxy.test/v1/pair/redeem',{method:'POST',body:'{'}),env);assert.equal(r.status,400);});
