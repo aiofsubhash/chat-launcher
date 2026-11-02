@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Focus profile's Timer note opens the clock app's timer UI -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
 
     <!-- Lets us list launchable apps without the restricted QUERY_ALL_PACKAGES permission -->
     <queries>
@@ -20,7 +22,8 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTask">
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <!-- LAUNCHER: appears in the app drawer of the old launcher.
