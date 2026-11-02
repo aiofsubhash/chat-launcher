@@ -150,6 +150,32 @@ class ChatHomeScreenshotTest {
         composeRule.onRoot().captureRoboImage()
     }
 
+    /** Prefix match hitting personal+work duplicates asks explicitly - never a silent pick, never a note. */
+    @Test
+    fun typedPrefixPersonalWorkDuplicateAsksChoice() {
+        val personal = AppEntry("Instagram", "com.instagram.android", Intent())
+        val work = AppEntry("Instagram", "com.instagram.android", Intent(), isWork = true, userSerial = 10L)
+        val prefs = composeRule.activity.getSharedPreferences("chat_launcher", android.content.Context.MODE_PRIVATE)
+        composeRule.activity.setContent {
+            MaterialTheme(colorScheme = calmColors) {
+                ChatHome(
+                    router = CommandRouter(composeRule.activity, prefs),
+                    resolveApps = { q -> if (q.isNotBlank() && "instagram".contains(q, true)) listOf(personal, work) else emptyList() },
+                    shareTargets = { emptyList() },
+                    allApps = { listOf(personal, work) },
+                    sendToLlm = { _, _ -> null },
+                    launchApp = { true },
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("insta")
+        composeRule.onNodeWithText("Send").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Instagram (personal)").assertExists()
+        composeRule.onNodeWithText("Instagram (work)", substring = true).assertExists()
+    }
+
     /** Dark theme home: the paper palette's dark variant over the same layout. */
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
