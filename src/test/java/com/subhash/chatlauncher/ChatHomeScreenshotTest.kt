@@ -82,6 +82,21 @@ class ChatHomeScreenshotTest {
         installFakeApp("com.instagram.android", "Instagram")
         installFakeApp("com.android.camera2", "Camera")
         installFakeApp("com.google.android.gm", "Gmail", canSend = true)
+        installFakeApp("com.google.android.deskclock", "Clock")
+        // Let the clock app resolve alarm/timer intents (Focus profile's Timer note).
+        val pm = ApplicationProvider.getApplicationContext<android.content.Context>().packageManager
+        val spm: ShadowPackageManager = Shadows.shadowOf(pm)
+        val clockInfo = ApplicationInfo().apply { packageName = "com.google.android.deskclock"; nonLocalizedLabel = "Clock" }
+        val clockRi = ResolveInfo().apply {
+            activityInfo = ActivityInfo().apply {
+                packageName = "com.google.android.deskclock"
+                name = "com.google.android.deskclock.AlarmActivity"
+                applicationInfo = clockInfo
+                nonLocalizedLabel = "Clock"
+            }
+        }
+        spm.addResolveInfoForIntent(Intent(android.provider.AlarmClock.ACTION_SHOW_TIMERS), clockRi)
+        spm.addResolveInfoForIntent(Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS), clockRi)
     }
 
     @Test
@@ -231,7 +246,7 @@ class ChatHomeScreenshotTest {
         composeRule.onRoot().captureRoboImage()
     }
 
-    private fun settingsPageContent(switcherOpen: Boolean = false, section: String? = null, pickerOpen: Boolean = false, editing: String? = null, editorOpen: Boolean = false, dark: Boolean = false) {
+    private fun settingsPageContent(switcherOpen: Boolean = false, section: String? = null, pickerOpen: Boolean = false, editing: String? = null, editorOpen: Boolean = false, dark: Boolean = false, historyEntries: List<HistoryEntry> = emptyList()) {
         val apps = listOf(
             AppEntry("WhatsApp", "com.whatsapp", Intent()),
             AppEntry("Chrome", "com.android.chrome", Intent()),
@@ -248,12 +263,13 @@ class ChatHomeScreenshotTest {
                     selected = if (editing != null) setOf("com.spotify.music") else emptySet(), onSelected = {},
                     dockSelected = setOf("com.google.android.apps.maps", "com.android.chrome", "com.spotify.music", "com.phonepe.app"),
                     onDockSelected = {},
-                    profiles = setOf("Focus", "Sleep"),
+                    profiles = setOf("Focus", "Work", "Sleep"),
                     onToggleProfile = {}, onDeleteProfile = {},
                     editingProfile = editing, onEditProfile = {},
                     gridWobbly = true, onGridWobbly = {},
                     activeProfile = "Focus",
                     apps = apps,
+                    historyEntries = historyEntries,
                     onCancel = {}, onSave = {},
                     switcherInitiallyOpen = switcherOpen,
                     pickerInitiallyOpen = pickerOpen,
@@ -282,11 +298,17 @@ class ChatHomeScreenshotTest {
         composeRule.onRoot().captureRoboImage()
     }
 
-    /** History subpage: truthfully labelled as not built yet. */
+    /** History subpage with captured exchanges: local lines and a tagged cloud reply. */
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
     fun settingsPageHistory() {
-        settingsPageContent(section = "history")
+        val entries = listOf(
+            HistoryEntry(1762074600000, "assistant", "cloud", "A good birthday gift could be a nice pen. "),
+            HistoryEntry(1762074550000, "user", "local", "what's a good birthday gift for my dad"),
+            HistoryEntry(1762074000000, "assistant", "local", "Draft ready in WhatsApp for Sumit - pick the chat and tap send."),
+            HistoryEntry(1762073900000, "user", "local", "send a message to Sumit on WhatsApp: happy birthday"),
+        )
+        settingsPageContent(section = "history", historyEntries = entries)
         composeRule.waitForIdle()
         composeRule.onRoot().captureRoboImage()
     }
@@ -337,6 +359,96 @@ class ChatHomeScreenshotTest {
         composeRule.onNodeWithText("write what you want to do").performTextInput("send this message to Avinash: hello, running late")
         composeRule.onNodeWithText("send this message to Avinash: hello, running late").performImeAction()
         composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Chat active: notes stay visible above a bottom-only conversation section. */
+    @Test
+    fun homeChatKeepsNotesVisible() {
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("uber to airport")
+        composeRule.onNodeWithText("Send").performClick()
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** No API key needed for drafts: missing text is asked inline, then the draft hands off. */
+    @Test
+    fun draftNoKeyFlow() {
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("send a message to Sumit on WhatsApp")
+        composeRule.onNodeWithText("Send").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("What should I say to Sumit?").assertExists()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("happy birthday")
+        composeRule.onNodeWithText("Send").performClick()
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Unhandled text is captured locally with an explicit Ask AI action - never auto-sent. */
+    @Test
+    fun askAiExplicitAction() {
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("what's a good birthday gift for my dad")
+        composeRule.onNodeWithText("Send").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Ask AI").assertExists()
+        composeRule.onNodeWithText("Ask AI").performClick()
+        composeRule.waitForIdle()
+        // No connection configured: local guidance, nothing sent.
+        composeRule.onNodeWithText("Ask AI needs a connection first - add a key or pairing code in Settings > Account. Nothing was sent.").assertExists()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Focus profile home: only the Timer note (opens the phone's clock app). */
+    @Test
+    fun focusProfileDock() {
+        val prefs = composeRule.activity.getSharedPreferences("chat_launcher", android.content.Context.MODE_PRIVATE)
+        prefs.edit().putString("active_profile", "Focus").commit()
+        composeRule.activityRule.scenario.recreate()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Timer").assertExists()
+        composeRule.onNodeWithText("PhonePe").assertDoesNotExist()
+        composeRule.onRoot().captureRoboImage()
+        prefs.edit().remove("active_profile").commit()
+    }
+
+    /** Work profile home with a managed duplicate: the work Gmail shows with its marker. */
+    @Test
+    fun workProfileDock() {
+        val personal = AppEntry("Gmail", "com.google.android.gm", Intent())
+        val work = AppEntry("Gmail", "com.google.android.gm", Intent(), isWork = true, userSerial = 10L)
+        val prefs = composeRule.activity.getSharedPreferences("chat_launcher", android.content.Context.MODE_PRIVATE)
+        composeRule.activity.setContent {
+            MaterialTheme(colorScheme = calmColors) {
+                ChatHome(
+                    router = CommandRouter(composeRule.activity, prefs).apply { activeProfile = "Work" },
+                    resolveApps = { listOf(personal, work) },
+                    shareTargets = { emptyList() },
+                    allApps = { listOf(personal, work) },
+                    sendToLlm = { _, _ -> null },
+                    launchApp = { true },
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("💼 Gmail").assertExists()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Regression for the device report "typed Insta, Enter, said opening but nothing happened":
+     *  the IME Enter path must dispatch a launch intent at the real Instagram component.
+     *  (Dispatch truth only - whether a device foregrounds the app is not observable here.) */
+    @Test
+    fun instaEnterDispatchesLaunch() {
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("Insta")
+        composeRule.onNodeWithText("Insta").performImeAction()
+        composeRule.waitForIdle()
+        val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
+        org.junit.Assert.assertNotNull("an open request was dispatched", started)
+        org.junit.Assert.assertEquals("com.instagram.android", started.component?.packageName)
         composeRule.onRoot().captureRoboImage()
     }
 }
