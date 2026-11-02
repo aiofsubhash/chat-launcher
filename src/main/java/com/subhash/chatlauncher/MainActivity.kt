@@ -6,8 +6,11 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -20,11 +23,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -38,6 +41,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -93,7 +97,6 @@ val darkCalmColors = darkColorScheme(
     surfaceContainerHigh = Color(0xFF33312E),
 )
 
-/** WCAG relative luminance and contrast ratio, shared with ContrastTest via the palette. */
 val sendButtonTextColor = Color(0xFF080502)
 val accentBrown = Color(0xFFB08968)
 
@@ -153,8 +156,12 @@ data class ChatMessage(
     val fromUser: Boolean,
     val text: String,
     val isHtml: Boolean = false,
+    /** True when this reply came from the cloud AI (captioned, tagged in history). */
+    val fromCloud: Boolean = false,
     val choiceApps: List<AppEntry> = emptyList(),
     val onChoice: ((AppEntry) -> Unit)? = null,
+    /** When set, an explicit "Ask AI" action sends ONLY this prompt to the cloud. */
+    val askAi: String? = null,
 )
 
 data class AppEntry(
@@ -166,7 +173,7 @@ data class AppEntry(
     val userSerial: Long = -1,
 ) {
     /** Briefcase marker distinguishes duplicate work-profile entries in the text-first UI. */
-    val displayLabel: String get() = if (isWork) "\uD83D\uDCBC $label" else label
+    val displayLabel: String get() = if (isWork) "💼 $label" else label
 
     /**
      * Stable identity across personal/work duplicates of the same package: userSerial is the
@@ -179,17 +186,22 @@ data class AppEntry(
         else packageName
 
     /** Unambiguous label for personal/work duplicate choices: both sides named. */
-    val choiceLabel: String get() = if (isWork) "\uD83D\uDCBC $label (work)" else "$label (personal)"
+    val choiceLabel: String get() = if (isWork) "💼 $label (work)" else "$label (personal)"
 }
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var router: CommandRouter
+    private lateinit var historyStore: HistoryStore
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val prefs = getSharedPreferences("chat_launcher", MODE_PRIVATE)
         router = CommandRouter(this, prefs)
+        historyStore = HistoryStore(prefs)
+        // Hidden-list -> allow-list migration, only with a real app list (else deferred).
+        val keys = installedApps().map { it.identityKey }.toSet()
+        if (keys.isNotEmpty()) router.migrateHiddenProfiles(keys)
         setContent {
             var themeMode by remember { mutableStateOf(router.themeMode) }
             val darkTheme = when (themeMode) {
@@ -206,33 +218,30 @@ class MainActivity : ComponentActivity() {
                     resolveApps = { query -> resolveApps(query) },
                     shareTargets = { text -> shareTargets(text) },
                     allApps = { resolveApps("", limit = Int.MAX_VALUE) },
+                    history = historyStore,
+                    aiAvailable = { router.apiKey.isNotBlank() },
+                    timerApp = router.timerIntent()?.let { AppEntry("Timer", CommandRouter.TIMER_KEY, it) },
                     sendToLlm = { history, onDelta ->
                         val key = router.apiKey
+                        val endpoint = router.chatEndpoint
                         if (key.isBlank()) {
                             null
+                        } else if (endpoint.isNotBlank()) {
+                            // Connect AI: the server fixes the (free) model; credential is the bearer.
+                            LlmClient.chatStream(key, LlmClient.defaultModel(LlmClient.Provider.OPENROUTER), history, endpoint, onDelta)
                         } else {
                             val provider = LlmClient.providerForKey(key)
                             val gated = LlmClient.gatedModel(provider, router.model, router.freeModelIds.ifEmpty { null })
                             if (gated == null) {
                                 "Your saved model '${router.model}' isn't verified as free on OpenRouter - re-save it in Settings > Account or clear it to use the free default."
                             } else {
-                                LlmClient.chatStream(key, gated, history, onDelta)
+                                LlmClient.chatStream(key, gated, history, "", onDelta)
                             }
                         }
                     },
                     launchApp = { app ->
-                        try {
-                            val handle = app.userHandle
-                            if (app.isWork && handle != null) {
-                                getSystemService(android.content.pm.LauncherApps::class.java)
-                                    .startMainActivity(app.launch.component, handle, null, null)
-                            } else {
-                                startActivity(app.launch)
-                            }
-                            true
-                        } catch (e: Exception) {
-                            false
-                        }
+                        if (app.packageName == CommandRouter.TIMER_KEY) router.launchTimer()
+                        else router.launchAppEntry(app)
                     },
                 )
                 }
@@ -240,13 +249,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // Apps that can take a text share draft, filtered by the active focus profile.
+    // Apps that can take a text share draft, trimmed by the active profile's allow-list.
     private fun shareTargets(text: String): List<AppEntry> {
         val pm = packageManager
         val send = Intent(Intent.ACTION_SEND).setType("text/plain")
-        val hidden = router.hiddenNow()
+        val allowed = currentAllowed()
         val resolved = pm.queryIntentActivities(send, 0).map { it.loadLabel(pm).toString() to it.activityInfo.packageName }
-        val chosen = CommandRouter.shareTargetsOf(resolved, packageName, hidden)
+        val chosen = CommandRouter.shareTargetsOf(resolved, packageName, allowed)
         val byPkg = pm.queryIntentActivities(send, 0).associateBy { it.activityInfo.packageName }
         return chosen.mapNotNull { (label, pkg) ->
             val ri = byPkg[pkg] ?: return@mapNotNull null
@@ -259,7 +268,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // Installed launchable apps are loaded once; focus filtering and search run on the cached list.
+    private fun workKeys(): List<String> = installedApps().filter { it.isWork }.map { it.identityKey }
+
+    private fun currentAllowed(): Set<String>? = router.allowedNow(workKeys().toSet())
+
+    // Installed launchable apps are loaded once; profile filtering and search run on the cached list.
     // Work-profile apps come from LauncherApps profiles and are marked with isWork; devices
     // without a managed profile just return the personal set.
     private fun queryInstalledApps(): List<AppEntry> {
@@ -305,17 +318,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun resolveApps(query: String, limit: Int = 6): List<AppEntry> {
-        val hidden = router.hiddenNow()
+        val allowed = currentAllowed()
         return installedApps()
             .asSequence()
-            .filter { it.identityKey !in hidden }
+            .filter { allowed == null || it.identityKey in allowed }
             .filter { query.isBlank() || it.label.contains(query, true) || it.packageName.contains(query, true) }
             .sortedBy {
                 val i = it.label.indexOf(query, ignoreCase = true)
                 if (i < 0) Int.MAX_VALUE else i
             }
             .toList()
-            .let { CommandRouter.prioritizeWork(it, router.activeProfile.equals("work", ignoreCase = true)) }
+            .let { CommandRouter.prioritizeWork(it, router.activeProfile == CommandRouter.WORK) }
             .take(limit)
     }
 }
@@ -330,6 +343,9 @@ fun ChatHome(
     allApps: () -> List<AppEntry>,
     sendToLlm: suspend (List<Pair<String, String>>, suspend (String) -> Unit) -> String?,
     launchApp: (AppEntry) -> Boolean,
+    history: HistoryStore? = null,
+    aiAvailable: () -> Boolean = { false },
+    timerApp: AppEntry? = null,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -340,13 +356,25 @@ fun ChatHome(
     var showSettings by remember { mutableStateOf(false) }
     var dockPackages by remember { mutableStateOf(router.dockApps) }
     var gridWobbly by remember { mutableStateOf(router.gridWobbly) }
-    val suggestions = remember(input, activeProfile) { if (input.isBlank()) emptyList() else resolveApps(input) } // resolveApps reads a cached list inside Activity
-    // Home dock: user-configured apps (default Maps, Chrome, Spotify, PhonePe), focus-hidden apps stay hidden.
-    // Computed on each recomposition so package changes and dock edits show immediately.
+    // Set when the draft's body is being asked for; the next line completes it.
+    var pendingDraft by remember { mutableStateOf<Pair<String, String?>?>(null) }
+    val suggestions = remember(input, activeProfile) { if (input.isBlank()) emptyList() else resolveApps(input) }
+
+    // Dock: no profile = the user's chosen apps; a profile shows exactly its allow-list
+    // (Timer first in Focus; work entries first in Work).
     val allInstalled = allApps()
-    val focusHidden = router.hiddenNow()
-    val dockApps = dockPackages.mapNotNull { key -> allInstalled.firstOrNull { it.identityKey == key } }
-        .filter { it.identityKey !in focusHidden }
+    val workKeys = allInstalled.filter { it.isWork }.map { it.identityKey }.toSet()
+    val dockApps: List<AppEntry> = run {
+        val profile = activeProfile
+        if (profile == null) {
+            dockPackages.mapNotNull { key -> allInstalled.firstOrNull { it.identityKey == key } }
+        } else {
+            val allowed = router.effectiveAllowed(profile, workKeys)
+            val apps = allInstalled.filter { it.identityKey in allowed }
+                .sortedWith(compareByDescending<AppEntry> { it.isWork }.thenBy { it.label })
+            (if (CommandRouter.TIMER_KEY in allowed && timerApp != null) listOf(timerApp) else emptyList()) + apps
+        }
+    }
 
     // Live clock for the top bar, refreshed every 30s.
     var now by remember { mutableStateOf(SimpleDateFormat("EEE, d MMM - HH:mm", Locale.getDefault()).format(Date())) }
@@ -355,28 +383,164 @@ fun ChatHome(
         while (true) {
             now = SimpleDateFormat("EEE, d MMM - HH:mm", Locale.getDefault()).format(Date())
             // 30 minutes idle starts a fresh chat - but never silently discards an unsent
-            // draft or an unanswered question from the assistant.
+            // draft, an unanswered question, or a pending Ask AI / draft-text prompt.
             if (CommandRouter.shouldResetChat(
                     idleMillis = System.currentTimeMillis() - lastActivityAt,
                     hasMessages = messages.isNotEmpty(),
                     hasDraft = input.isNotBlank(),
-                    hasPendingQuestion = messages.lastOrNull()?.choiceApps?.isNotEmpty() == true,
+                    hasPendingQuestion = messages.lastOrNull()?.let { it.choiceApps.isNotEmpty() || it.askAi != null } == true,
                 )
             ) {
                 messages = emptyList()
+                pendingDraft = null
             }
             delay(30_000)
+        }
+    }
+
+    fun addUser(text: String) {
+        messages = messages + ChatMessage(true, text)
+        history?.append("user", "local", text)
+    }
+
+    fun addAssistant(
+        text: String,
+        fromCloud: Boolean = false,
+        choiceApps: List<AppEntry> = emptyList(),
+        onChoice: ((AppEntry) -> Unit)? = null,
+        askAi: String? = null,
+    ) {
+        messages = messages + ChatMessage(false, text, fromCloud = fromCloud, choiceApps = choiceApps, onChoice = onChoice, askAi = askAi)
+        if (text.isNotBlank()) history?.append("assistant", if (fromCloud) "cloud" else "local", text)
+    }
+
+    fun handleDraft(result: CommandRouter.Result.DraftMessage) {
+        when {
+            result.text == null -> {
+                pendingDraft = result.to to result.pkg
+                addAssistant("What should I say to ${result.to}?")
+            }
+            result.pkg != null -> addAssistant(router.execute(result))
+            else -> {
+                val targets = shareTargets(result.text)
+                addAssistant(
+                    "Which app should I put that draft in? You'll pick the chat and send it there.",
+                    choiceApps = targets,
+                    onChoice = { app ->
+                        launchApp(app)
+                        addAssistant("Draft opened in ${app.displayLabel} for ${result.to} - pick the chat and tap send there.")
+                    },
+                )
+            }
+        }
+    }
+
+    fun handleResult(result: CommandRouter.Result) {
+        when (result) {
+            is CommandRouter.Result.Reply -> {
+                if (result.text.startsWith("Profile '")) activeProfile = router.activeProfile
+                if (result.text == "Focus mode off.") activeProfile = null
+                addAssistant(result.text)
+            }
+            is CommandRouter.Result.DraftMessage -> handleDraft(result)
+            is CommandRouter.Result.ChooseApp -> addAssistant(
+                "I see more than one '${result.label}' here - which one?",
+                choiceApps = result.apps,
+                onChoice = { app -> addAssistant(router.execute(CommandRouter.Result.Launch(app))) },
+            )
+            else -> {
+                val note = router.execute(result)
+                if (note.isNotEmpty()) addAssistant(note)
+            }
+        }
+    }
+
+    /** Explicit, per-message cloud AI: ONLY this prompt leaves the phone. No history goes with it. */
+    fun askAi(prompt: String) {
+        lastActivityAt = System.currentTimeMillis()
+        if (!aiAvailable()) {
+            addAssistant("Ask AI needs a connection first - add a key or pairing code in Settings > Account. Nothing was sent.")
+            return
+        }
+        scope.launch {
+            messages = messages + ChatMessage(false, "", fromCloud = true)
+            var acc = ""
+            val reply = sendToLlm(listOf("user" to prompt)) { delta ->
+                acc += delta
+                messages = messages.dropLast(1) + ChatMessage(false, acc, fromCloud = true)
+            }
+            val finalText = reply ?: "Couldn't reach the AI - nothing was sent."
+            messages = messages.dropLast(1) + ChatMessage(
+                false,
+                finalText,
+                fromCloud = reply != null,
+                isHtml = reply?.contains(Regex("<[a-z]+[ >]")) == true,
+            )
+            history?.append("assistant", if (reply != null) "cloud" else "local", finalText)
+        }
+    }
+
+    fun send() {
+        val raw = input.trim()
+        if (raw.isEmpty()) return
+        lastActivityAt = System.currentTimeMillis()
+        input = ""
+        // A pending "what should I say?" question: this line is the draft body.
+        val pending = pendingDraft
+        if (pending != null) {
+            if (raw.equals("cancel", true) || raw.equals("never mind", true)) {
+                pendingDraft = null
+                addUser(raw)
+                addAssistant("Okay, dropped that draft.")
+                return
+            }
+            pendingDraft = null
+            addUser(raw)
+            handleDraft(CommandRouter.Result.DraftMessage(pending.first, raw, pending.second))
+            return
+        }
+        addUser(raw)
+        val result = router.route(raw, suggestions)
+        if (result is CommandRouter.Result.Reply && result.text.isEmpty()) {
+            // Local-first: unhandled text is captured, never sent anywhere. Cloud AI is a
+            // separate, explicit, per-message action.
+            addAssistant(
+                "Noted - that's saved in history on this phone. Want me to ask the AI about it? Only this one message would leave the phone.",
+                askAi = raw,
+            )
+        } else {
+            handleResult(result)
+        }
+    }
+
+    @Composable
+    fun DockRow(modifier: Modifier = Modifier) {
+        Row(
+            // Scrollable so large font scales never clip note labels.
+            modifier = modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            val tilts = listOf(-2.5f, 1.5f, -1.5f, 2.5f)
+            dockApps.forEachIndexed { i, app ->
+                StickyNote(app, roundedFont, tilt = tilts[i % tilts.size], onLaunch = {
+                    lastActivityAt = System.currentTimeMillis()
+                    if (!launchApp(app)) {
+                        addAssistant(if (app.packageName == CommandRouter.TIMER_KEY) "No clock app on this phone handles timers." else CommandRouter.launchFailureMessage(app))
+                    }
+                })
+            }
         }
     }
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
     PaperGrid(Modifier.fillMaxSize(), wobbly = gridWobbly)
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp)) {
-        // Top bar: New chat left, date + time center, settings right
+        // Top bar: Fresh chat left, settings right
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = {
                 messages = emptyList()
                 input = ""
+                pendingDraft = null
                 activeProfile = router.activeProfile
             }) { Text("Fresh chat", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 17.sp, fontFamily = roundedFont) }
             Spacer(Modifier.weight(1f))
@@ -405,23 +569,16 @@ fun ChatHome(
             modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
         )
 
-        // Home dock when the chat is empty: centered, slightly below middle for thumb reach
         if (messages.isEmpty()) {
+            // Empty home: notes centered (raised from the old lower position).
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Row(
-                    // Scrollable so large font scales never clip note labels.
-                    modifier = Modifier.offset(y = 56.dp).horizontalScroll(androidx.compose.foundation.rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    val tilts = listOf(-2.5f, 1.5f, -1.5f, 2.5f)
-                    dockApps.forEachIndexed { i, app ->
-                        StickyNote(app, roundedFont, tilt = tilts[i % tilts.size], onLaunch = { launchApp(app) })
-                    }
-                }
+                DockRow()
             }
         } else {
-        // Chat history
-        LazyColumn(modifier = Modifier.weight(1f), reverseLayout = true) {
+            // Notes stay visible; the conversation lives in a bottom-only section that
+            // scrolls inside itself - the chat never takes over the screen.
+            DockRow(Modifier.fillMaxWidth().padding(top = 18.dp))
+            LazyColumn(modifier = Modifier.weight(1f).padding(top = 8.dp), reverseLayout = true) {
             items(messages.asReversed()) { msg ->
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -440,6 +597,21 @@ fun ChatHome(
                             HtmlBubble(msg.text)
                         } else {
                             Text(msg.text, fontFamily = roundedFont, modifier = Modifier.padding(vertical = 6.dp))
+                        }
+                        if (!msg.fromUser && msg.fromCloud) {
+                            Text("cloud ai", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f), fontFamily = roundedFont)
+                        }
+                        if (!msg.fromUser && msg.askAi != null) {
+                            Text(
+                                "Ask AI",
+                                color = accentText,
+                                fontSize = 15.sp,
+                                fontFamily = roundedFont,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { askAi(msg.askAi) }
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                            )
                         }
                         if (msg.choiceApps.isNotEmpty()) {
                             // Stacked full-width choices: long labels stay readable, no squashed towers.
@@ -469,67 +641,10 @@ fun ChatHome(
                     }
                 }
             }
-        }
-        }
-
-
-        // Input: large inset composer card with inner send pill
-        fun send() {
-            val raw = input.trim()
-            if (raw.isEmpty()) return
-            lastActivityAt = System.currentTimeMillis()
-            input = ""
-            messages = messages + ChatMessage(true, raw)
-            val result = router.route(raw, suggestions)
-            if (result is CommandRouter.Result.Reply && result.text.isEmpty()) {
-                scope.launch {
-                    // Streamed reply: the assistant message grows in place as chunks arrive.
-                    messages = messages + ChatMessage(false, "")
-                    var acc = ""
-                    val reply = sendToLlm(messages.dropLast(1).map { (if (it.fromUser) "user" else "assistant") to it.text }) { delta ->
-                        acc += delta
-                        messages = messages.dropLast(1) + ChatMessage(false, acc)
-                    }
-                    messages = messages.dropLast(1) + ChatMessage(
-                        false,
-                        reply ?: "No API key yet - add one in Settings > Account, then I can actually chat.",
-                        isHtml = reply?.contains(Regex("<[a-z]+[ >]")) == true,
-                    )
-                }
-            } else if (result is CommandRouter.Result.DraftMessage) {
-                if (result.pkg != null) {
-                    // Explicit channel bypasses the question.
-                    messages = messages + ChatMessage(false, router.execute(result))
-                } else {
-                    val targets = shareTargets(result.text)
-                    messages = messages + ChatMessage(
-                        false,
-                        "Which app should I put that draft in? You'll pick the chat and send it there.",
-                        choiceApps = targets,
-                        onChoice = { app ->
-                            launchApp(app)
-                            messages = messages + ChatMessage(false, "Draft opened in ${app.displayLabel} for ${result.to} - pick the chat and tap send there.")
-                        },
-                    )
-                }
-            } else if (result is CommandRouter.Result.ChooseApp) {
-                messages = messages + ChatMessage(
-                    false,
-                    "I see more than one '${result.label}' here - which one?",
-                    choiceApps = result.apps,
-                    onChoice = { app -> messages = messages + ChatMessage(false, router.execute(CommandRouter.Result.Launch(app))) },
-                )
-            } else {
-                if (result is CommandRouter.Result.Reply && result.text.startsWith("Focus profile '")) {
-                    activeProfile = router.activeProfile
-                }
-                if (result is CommandRouter.Result.Reply && result.text == "Focus mode off.") {
-                    activeProfile = null
-                }
-                val note = router.execute(result)
-                if (note.isNotEmpty()) messages = messages + ChatMessage(false, note)
             }
         }
+
+        // Input: large inset composer card with inner send pill
         Surface(
             shape = RoundedCornerShape(16.dp),
             color = MaterialTheme.colorScheme.surface,
@@ -564,7 +679,7 @@ fun ChatHome(
                                         .padding(end = 8.dp)
                                         .clickable {
                                             if (!launchApp(app)) {
-                                                messages = messages + ChatMessage(false, CommandRouter.launchFailureMessage(app))
+                                                addAssistant(CommandRouter.launchFailureMessage(app))
                                             }
                                         },
                                 ) {
@@ -594,8 +709,6 @@ fun ChatHome(
     }
     }
 
-    // Focus-aware draft picker: hidden apps never appear, the user picks and confirms in the target app.
-
     if (showSettings) {
         SettingsDialog(
             router = router,
@@ -608,6 +721,7 @@ fun ChatHome(
             onActiveProfile = { activeProfile = it },
             themeMode = themeMode,
             onThemeMode = onThemeMode,
+            historyEntries = { history?.all() ?: emptyList() },
             onClose = { showSettings = false },
         )
     }
@@ -620,7 +734,6 @@ fun HtmlBubble(html: String) {
         factory = { ctx ->
             WebView(ctx).apply {
                 // Untrusted model output: no script, no file/content access, navigation blocked.
-                // Remote images may still load (accepted for v1; revisit if content policy tightens).
                 settings.javaScriptEnabled = false
                 settings.allowFileAccess = false
                 settings.allowContentAccess = false
@@ -636,15 +749,29 @@ fun HtmlBubble(html: String) {
 }
 
 @Composable
-fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApps: List<String>, onDockApps: (List<String>) -> Unit, gridWobbly: Boolean, onGridWobbly: (Boolean) -> Unit, activeProfile: String?, onActiveProfile: (String?) -> Unit, themeMode: String = "system", onThemeMode: (String) -> Unit = {}, onClose: () -> Unit) {
+fun SettingsDialog(
+    router: CommandRouter,
+    allApps: () -> List<AppEntry>,
+    dockApps: List<String>,
+    onDockApps: (List<String>) -> Unit,
+    gridWobbly: Boolean,
+    onGridWobbly: (Boolean) -> Unit,
+    activeProfile: String?,
+    onActiveProfile: (String?) -> Unit,
+    themeMode: String = "system",
+    onThemeMode: (String) -> Unit = {},
+    historyEntries: () -> List<HistoryEntry> = { emptyList() },
+    onClose: () -> Unit,
+) {
     var key by remember { mutableStateOf(router.apiKey) }
+    var endpoint by remember { mutableStateOf(router.chatEndpoint) }
     var model by remember { mutableStateOf(router.model) }
     var profileName by remember { mutableStateOf("") }
     var selected by remember { mutableStateOf(setOf<String>()) }
     var dockSelected by remember { mutableStateOf(dockApps.toSet()) }
     // Everything stages locally: Cancel discards all of it, Save applies it all at once.
     var stagedActive by remember { mutableStateOf(activeProfile) }
-    var stagedHidden by remember { mutableStateOf(router.profileNames().associateWith { router.profileHidden(it) }) }
+    var stagedAllowed by remember { mutableStateOf(router.profileNames().associateWith { router.profileAllowed(it) }) }
     var editingProfile by remember { mutableStateOf<String?>(null) }
     val apps = remember { allApps() }
     val scope = rememberCoroutineScope()
@@ -652,50 +779,56 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApp
 
     SettingsPage(
         key = key, onKey = { key = it },
+        endpoint = endpoint, onEndpoint = { endpoint = it },
         model = model, onModel = { model = it; modelStatus = null },
         modelStatus = modelStatus,
         profileName = profileName, onProfileName = { profileName = it },
         selected = selected, onSelected = { selected = it },
         dockSelected = dockSelected, onDockSelected = { dockSelected = it },
-        profiles = stagedHidden.keys,
+        profiles = stagedAllowed.keys,
         onToggleProfile = { p ->
             stagedActive = if (p == null || stagedActive == p) null else p
         },
         onDeleteProfile = { p ->
-            stagedHidden = stagedHidden - p
-            if (stagedActive == p) stagedActive = null
-            if (editingProfile == p) { editingProfile = null; selected = emptySet() }
+            if (!router.isBuiltin(p)) {
+                stagedAllowed = stagedAllowed - p
+                if (stagedActive == p) stagedActive = null
+                if (editingProfile == p) { editingProfile = null; selected = emptySet() }
+            }
         },
         editingProfile = editingProfile,
         onEditProfile = { p ->
             editingProfile = p
-            selected = p?.let { stagedHidden[it] } ?: emptySet()
+            selected = p?.let { stagedAllowed[it] } ?: emptySet()
         },
         gridWobbly = gridWobbly, onGridWobbly = onGridWobbly,
         activeProfile = stagedActive,
         themeMode = themeMode, onThemeMode = onThemeMode,
         apps = apps,
+        historyEntries = historyEntries(),
         onCancel = onClose,
         onSave = {
             fun applyAll() {
-                val finalHidden = stagedHidden.toMutableMap()
+                val finalAllowed = stagedAllowed.toMutableMap()
                 val editing = editingProfile
                 if (editing != null) {
-                    finalHidden[editing] = selected
+                    finalAllowed[editing] = selected
                 } else if (profileName.isNotBlank()) {
-                    finalHidden[profileName.trim()] = selected
+                    finalAllowed[profileName.trim()] = selected
                 }
-                (router.profileNames() - finalHidden.keys).forEach { router.deleteProfile(it) }
-                finalHidden.forEach { (n, h) -> router.saveProfile(n, h) }
-                val newActive = stagedActive?.takeIf { it in finalHidden.keys }
+                (router.profileNames() - finalAllowed.keys).forEach { router.deleteProfile(it) }
+                finalAllowed.forEach { (n, a) -> router.saveProfile(n, a) }
+                val newActive = stagedActive?.takeIf { it in finalAllowed.keys }
                 router.activeProfile = newActive
                 onActiveProfile(newActive)
                 onDockApps(apps.map { it.identityKey }.filter { it in dockSelected })
                 onClose()
             }
             router.apiKey = key.trim()
+            router.chatEndpoint = endpoint.trim()
             val requestedModel = model.trim()
-            if (requestedModel.isNotEmpty() && LlmClient.providerForKey(key.trim()) == LlmClient.Provider.OPENROUTER) {
+            // An endpoint (Connect AI) lets the server fix the model: no local catalog check.
+            if (endpoint.isBlank() && requestedModel.isNotEmpty() && LlmClient.providerForKey(key.trim()) == LlmClient.Provider.OPENROUTER) {
                 // Free-only scope: check the id against OpenRouter's live catalog; offline only :free ids pass.
                 scope.launch {
                     val catalogIds = try { LlmClient.freeOpenRouterModels(LlmClient.fetchOpenRouterCatalog()) } catch (e: Exception) { null }
@@ -723,6 +856,7 @@ fun SettingsDialog(router: CommandRouter, allApps: () -> List<AppEntry>, dockApp
 @Composable
 fun SettingsPage(
     key: String, onKey: (String) -> Unit,
+    endpoint: String = "", onEndpoint: (String) -> Unit = {},
     model: String = "", onModel: (String) -> Unit = {},
     modelStatus: String? = null,
     profileName: String, onProfileName: (String) -> Unit,
@@ -737,6 +871,7 @@ fun SettingsPage(
     activeProfile: String?,
     themeMode: String = "system", onThemeMode: (String) -> Unit = {},
     apps: List<AppEntry>,
+    historyEntries: List<HistoryEntry> = emptyList(),
     onCancel: () -> Unit,
     onSave: () -> Unit,
     switcherInitiallyOpen: Boolean = false,
@@ -747,28 +882,29 @@ fun SettingsPage(
     val settingsContext = LocalContext.current
     val settingsFont = remember { RoundedTypeface.load(settingsContext) }
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp)) {
+        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Text(
                     "Cancel",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 15.sp,
                     fontFamily = settingsFont,
-                    modifier = Modifier.clickable { onCancel() }.padding(horizontal = 4.dp, vertical = 8.dp),
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onCancel() }.padding(horizontal = 12.dp, vertical = 8.dp),
                 )
                 Spacer(Modifier.weight(1f))
                 Surface(
                     shape = RoundedCornerShape(6.dp),
                     color = Color(0xFFB08968).copy(alpha = 0.8f),
-                    modifier = Modifier.clickable { onSave() },
+                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable { onSave() },
                 ) {
                     Text("Save", color = sendButtonTextColor, fontSize = 14.sp, fontFamily = settingsFont, modifier = Modifier.padding(horizontal = 20.dp, vertical = 9.dp))
                 }
             }
-            Text("Settings", style = MaterialTheme.typography.headlineSmall, fontFamily = settingsFont, modifier = Modifier.padding(top = 6.dp, bottom = 2.dp))
+            Text("Settings", style = MaterialTheme.typography.headlineSmall, fontFamily = settingsFont, modifier = Modifier.padding(top = 10.dp, bottom = 2.dp))
             Box(modifier = Modifier.weight(1f, fill = false)) {
                 SettingsContent(
                     key = key, onKey = onKey,
+                    endpoint = endpoint, onEndpoint = onEndpoint,
                     model = model, onModel = onModel,
                     modelStatus = modelStatus,
                     profileName = profileName, onProfileName = onProfileName,
@@ -780,6 +916,7 @@ fun SettingsPage(
                     activeProfile = activeProfile,
                     themeMode = themeMode, onThemeMode = onThemeMode,
                     apps = apps,
+                    historyEntries = historyEntries,
                     editingProfile = editingProfile, onEditProfile = onEditProfile,
                     switcherInitiallyOpen = switcherInitiallyOpen,
                     pickerInitiallyOpen = pickerInitiallyOpen,
@@ -791,10 +928,44 @@ fun SettingsPage(
     }
 }
 
+/** A tappable settings option with even padding inside the ripple - no lopsided press. */
+@Composable
+fun OptionText(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    font: androidx.compose.ui.text.font.FontFamily?,
+    fontSize: androidx.compose.ui.unit.TextUnit = 16.sp,
+) {
+    Text(
+        label,
+        fontFamily = font,
+        fontSize = fontSize,
+        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+        color = if (selected) accentText else MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+    )
+}
+
+/** Small section label in the settings hierarchy. */
+@Composable
+fun SectionLabel(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier,
+    )
+}
+
 /** Settings page content: current-profile switcher above navigation into focused subpages. */
 @Composable
 fun SettingsContent(
     key: String, onKey: (String) -> Unit,
+    endpoint: String = "", onEndpoint: (String) -> Unit = {},
     model: String = "", onModel: (String) -> Unit = {},
     modelStatus: String? = null,
     profileName: String, onProfileName: (String) -> Unit,
@@ -809,6 +980,7 @@ fun SettingsContent(
     activeProfile: String?,
     themeMode: String = "system", onThemeMode: (String) -> Unit = {},
     apps: List<AppEntry>,
+    historyEntries: List<HistoryEntry> = emptyList(),
     switcherInitiallyOpen: Boolean = false,
     pickerInitiallyOpen: Boolean = false,
     editorInitiallyOpen: Boolean = false,
@@ -817,81 +989,43 @@ fun SettingsContent(
     val settingsContext = LocalContext.current
     val roundedFont = remember { RoundedTypeface.load(settingsContext) }
     var tab by rememberSaveable { mutableStateOf(initialSection ?: "home") }
+    val builtins = listOf(CommandRouter.FOCUS, CommandRouter.WORK)
+    val orderedProfiles = builtins.filter { it in profiles } + (profiles - builtins.toSet()).sorted()
 
     Column(modifier = Modifier.fillMaxWidth()) {
         ProfileSwitcherRow(
             activeProfile = activeProfile,
-            profiles = profiles,
+            profiles = orderedProfiles,
             onToggleProfile = onToggleProfile,
             roundedFont = roundedFont,
             initiallyOpen = switcherInitiallyOpen,
         )
-        Row(modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
-            listOf("home" to "Home", "history" to "History", "account" to "Account").forEach { (id, label) ->
-                Text(
-                    label,
-                    fontFamily = roundedFont,
-                    fontSize = 17.sp,
-                    fontWeight = if (tab == id) FontWeight.Bold else FontWeight.Normal,
-                    color = if (tab == id) accentText else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.clickable { tab = id }.padding(end = 22.dp, top = 6.dp, bottom = 10.dp),
-                )
+        Row(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+            listOf("home" to "Home", "history" to "History", "account" to "Account").forEachIndexed { i, (id, label) ->
+                if (i > 0) Spacer(Modifier.width(6.dp))
+                OptionText(label, selected = tab == id, onClick = { tab = id }, font = roundedFont, fontSize = 17.sp)
             }
         }
         WobblyDivider()
-        LazyColumn(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+        LazyColumn(modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
             when (tab) {
                 "home" -> item {
-                    Text(
-                        "Grid style",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Row(modifier = Modifier.padding(top = 6.dp)) {
-                        Text(
-                            "Straight",
-                            fontFamily = roundedFont,
-                            fontSize = 16.sp,
-                            fontWeight = if (!gridWobbly) FontWeight.Bold else FontWeight.Normal,
-                            color = if (!gridWobbly) accentText else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.clickable { onGridWobbly(false) }.padding(end = 26.dp, top = 6.dp, bottom = 6.dp),
-                        )
-                        Text(
-                            "Wobbly",
-                            fontFamily = roundedFont,
-                            fontSize = 16.sp,
-                            fontWeight = if (gridWobbly) FontWeight.Bold else FontWeight.Normal,
-                            color = if (gridWobbly) accentText else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.clickable { onGridWobbly(true) }.padding(top = 6.dp, bottom = 6.dp),
-                        )
+                    SectionLabel("Grid style")
+                    Row(modifier = Modifier.padding(top = 4.dp)) {
+                        OptionText("Straight", selected = !gridWobbly, onClick = { onGridWobbly(false) }, font = roundedFont)
+                        Spacer(Modifier.width(4.dp))
+                        OptionText("Wobbly", selected = gridWobbly, onClick = { onGridWobbly(true) }, font = roundedFont)
                     }
-                    Text(
-                        "Theme",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 14.dp),
-                    )
-                    Row(modifier = Modifier.padding(top = 6.dp)) {
-                        listOf("system" to "System", "light" to "Light", "dark" to "Dark").forEach { (mode, label) ->
-                            Text(
-                                // Selected state is bold text, never color alone.
-                                label,
-                                fontFamily = roundedFont,
-                                fontSize = 16.sp,
-                                fontWeight = if (themeMode == mode) FontWeight.Bold else FontWeight.Normal,
-                                color = if (themeMode == mode) accentText else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.clickable { onThemeMode(mode) }.padding(end = 26.dp, top = 6.dp, bottom = 6.dp),
-                            )
+                    SectionLabel("Theme", modifier = Modifier.padding(top = 28.dp))
+                    Row(modifier = Modifier.padding(top = 4.dp)) {
+                        listOf("system" to "System", "light" to "Light", "dark" to "Dark").forEachIndexed { i, (mode, label) ->
+                            if (i > 0) Spacer(Modifier.width(4.dp))
+                            OptionText(label, selected = themeMode == mode, onClick = { onThemeMode(mode) }, font = roundedFont)
                         }
                     }
                     var editingApps by rememberSaveable { mutableStateOf(pickerInitiallyOpen) }
-                    Text(
-                        "Home apps",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 24.dp),
-                    )
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                    SectionLabel("Home apps", modifier = Modifier.padding(top = 28.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
                         Text(
                             apps.filter { it.identityKey in dockSelected }.joinToString(", ") { it.displayLabel }.ifBlank { "None" },
                             fontFamily = roundedFont,
@@ -899,13 +1033,7 @@ fun SettingsContent(
                             color = MaterialTheme.colorScheme.onBackground,
                             modifier = Modifier.weight(1f),
                         )
-                        Text(
-                            if (editingApps) "Done" else "Change",
-                            color = accentText,
-                            fontSize = 15.sp,
-                            fontFamily = roundedFont,
-                            modifier = Modifier.clickable { editingApps = !editingApps }.padding(horizontal = 4.dp, vertical = 8.dp),
-                        )
+                        OptionText(if (editingApps) "Done" else "Change", selected = false, onClick = { editingApps = !editingApps }, font = roundedFont, fontSize = 15.sp)
                     }
                     if (editingApps) {
                         Text(
@@ -928,51 +1056,57 @@ fun SettingsContent(
                         }
                     }
                     var confirmDelete by rememberSaveable { mutableStateOf<String?>(null) }
+                    SectionLabel("Profiles", modifier = Modifier.padding(top = 30.dp))
                     Text(
-                        "Focus profiles",
+                        "While a profile is on, only the apps added to it can be opened.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 26.dp),
+                        modifier = Modifier.padding(top = 6.dp),
                     )
-                    profiles.forEach { p ->
+                    orderedProfiles.forEach { p ->
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(vertical = 2.dp),
                         ) {
                             Text(p, modifier = Modifier.weight(1f), fontFamily = roundedFont, fontSize = 16.sp, color = MaterialTheme.colorScheme.onBackground)
-                            Text(
+                            OptionText(
                                 if (activeProfile == p) "Off" else "Use",
-                                color = accentText,
-                                fontSize = 15.sp,
-                                fontFamily = roundedFont,
-                                modifier = Modifier.clickable { confirmDelete = null; onToggleProfile(p) }.padding(horizontal = 12.dp, vertical = 8.dp),
+                                selected = false,
+                                onClick = { confirmDelete = null; onToggleProfile(p) },
+                                font = roundedFont, fontSize = 15.sp,
                             )
-                            Text(
+                            OptionText(
                                 "Edit",
-                                color = accentText,
-                                fontSize = 15.sp,
-                                fontFamily = roundedFont,
-                                modifier = Modifier.clickable { confirmDelete = null; onEditProfile(p) }.padding(horizontal = 6.dp, vertical = 8.dp),
+                                selected = false,
+                                onClick = { confirmDelete = null; onEditProfile(p) },
+                                font = roundedFont, fontSize = 15.sp,
                             )
-                            Text(
-                                if (confirmDelete == p) "Confirm delete" else "Delete",
-                                color = if (confirmDelete == p) accentText else MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 15.sp,
-                                fontFamily = roundedFont,
-                                modifier = Modifier.clickable {
-                                    if (confirmDelete == p) { confirmDelete = null; onDeleteProfile(p) }
-                                    else confirmDelete = p
-                                }.padding(horizontal = 6.dp, vertical = 8.dp),
-                            )
+                            if (p !in builtins) {
+                                Text(
+                                    if (confirmDelete == p) "Confirm delete" else "Delete",
+                                    color = if (confirmDelete == p) accentText else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 15.sp,
+                                    fontFamily = roundedFont,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            if (confirmDelete == p) { confirmDelete = null; onDeleteProfile(p) }
+                                            else confirmDelete = p
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 10.dp),
+                                )
+                            }
                         }
                     }
                     var editorOpen by rememberSaveable { mutableStateOf(editorInitiallyOpen) }
                     if (editorOpen || editingProfile != null) {
                         Text(
                             if (editingProfile != null) "Editing \"$editingProfile\"" else "New profile",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 18.dp),
+                            fontFamily = roundedFont,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.padding(top = 22.dp),
                         )
                         if (editingProfile == null) {
                             OutlinedTextField(
@@ -981,7 +1115,7 @@ fun SettingsContent(
                                 label = { Text("New profile name") },
                                 singleLine = true,
                                 shape = RoundedCornerShape(6.dp),
-                                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                             )
                         } else {
                             Text(
@@ -989,16 +1123,32 @@ fun SettingsContent(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 15.sp,
                                 fontFamily = roundedFont,
-                                modifier = Modifier.clickable { editorOpen = false; onEditProfile(null) }.padding(top = 4.dp, bottom = 6.dp),
+                                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { editorOpen = false; onEditProfile(null) }.padding(horizontal = 10.dp, vertical = 8.dp),
+                            )
+                        }
+                        if (editingProfile == CommandRouter.WORK) {
+                            Text(
+                                "Apps from your managed work profile are always available in Work. Add personal apps below if you want them too.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 10.dp),
+                            )
+                        } else if (editingProfile == CommandRouter.FOCUS) {
+                            Text(
+                                "Timer (your clock app) is always available in Focus. Add more apps below only if you want them.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 10.dp),
                             )
                         }
                         Text(
-                            if (editingProfile != null) "Apps hidden in $editingProfile:" else "Apps hidden in the new profile:",
+                            if (editingProfile != null) "Apps \"$editingProfile\" can open:" else "Apps the new profile can open:",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 12.dp),
+                            modifier = Modifier.padding(top = 14.dp),
                         )
-                        apps.forEach { app ->
+                        val editorApps = if (editingProfile == CommandRouter.WORK) apps.filter { !it.isWork } else apps
+                        editorApps.forEach { app ->
                             PaperCheckbox(
                                 checked = app.identityKey in selected,
                                 onToggle = {
@@ -1007,72 +1157,101 @@ fun SettingsContent(
                                 },
                                 label = app.displayLabel,
                                 roundedFont = roundedFont,
+                                modifier = Modifier.testTag("profile_app_" + app.identityKey),
                             )
                         }
                         if (editingProfile == null) {
-                            Text(
-                                "Done",
-                                color = accentText,
-                                fontSize = 15.sp,
-                                fontFamily = roundedFont,
-                                modifier = Modifier.clickable { editorOpen = false }.padding(top = 8.dp, bottom = 4.dp),
-                            )
+                            OptionText("Done", selected = false, onClick = { editorOpen = false }, font = roundedFont, fontSize = 15.sp)
                         }
                     } else {
-                        Text(
-                            "+ New profile",
-                            color = accentText,
-                            fontSize = 15.sp,
-                            fontFamily = roundedFont,
-                            modifier = Modifier.clickable { editorOpen = true }.padding(top = 14.dp, bottom = 6.dp),
-                        )
+                        OptionText("+ New profile", selected = false, onClick = { editorOpen = true }, font = roundedFont, fontSize = 15.sp)
                     }
                 }
                 "history" -> item {
                     Text("History", style = MaterialTheme.typography.titleMedium, fontFamily = roundedFont, modifier = Modifier.padding(bottom = 10.dp))
+                    if (historyEntries.isEmpty()) {
+                        Text(
+                            "Nothing yet - your chats, drafts and asks land here, on this phone only.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        historyEntries.take(50).forEach { e ->
+                            Column(modifier = Modifier.padding(vertical = 7.dp)) {
+                                Text(
+                                    "${SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()).format(Date(e.ts))} · ${if (e.role == "user") "You" else "Instinct"}${if (e.source == "cloud") " · cloud ai" else ""}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    e.text,
+                                    fontFamily = roundedFont,
+                                    fontSize = 15.sp,
+                                    color = MaterialTheme.colorScheme.onBackground,
+                                    modifier = Modifier.padding(top = 2.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+                "account" -> item {
+                    Text("Connect AI", style = MaterialTheme.typography.titleMedium, fontFamily = roundedFont, modifier = Modifier.padding(bottom = 10.dp))
                     Text(
-                        "Not built yet - every chat and ask will live here.",
+                        "Open-ended questions can go to a cloud AI - only when you tap \"Ask AI\" on a specific message, and only that message's text is sent. The provider's terms say don't send personal or confidential info; what you send leaves this phone and the provider logs it. Apps, drafts, notes, history and profiles never leave the phone.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                }
-                "account" -> item {
-                    Text("Account", style = MaterialTheme.typography.titleMedium, fontFamily = roundedFont, modifier = Modifier.padding(bottom = 10.dp))
                     OutlinedTextField(
                         value = key,
                         onValueChange = onKey,
-                        label = { Text("API key") },
+                        label = { Text("API key or pairing code") },
                         singleLine = true,
                         shape = RoundedCornerShape(6.dp),
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
                     )
                     Text(
-                        "Stored only on this device. Needed for open-ended chat; launching and drafts work without it.",
+                        "Stored only on this device.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 6.dp),
                     )
                     OutlinedTextField(
-                        value = model,
-                        onValueChange = onModel,
-                        label = { Text("Model (optional)") },
+                        value = endpoint,
+                        onValueChange = onEndpoint,
+                        label = { Text("Chat endpoint (optional)") },
                         singleLine = true,
                         shape = RoundedCornerShape(6.dp),
-                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                     )
                     Text(
-                        "Anthropic key: Claude by default. OpenRouter key (sk-or-...): free Nemotron by default - paste another model id to change it. Only models verified free on OpenRouter are accepted.",
+                        "Full URL of a chat endpoint (for example a Cloudflare Worker). With one set, the server chooses the model and your pairing code goes as the credential.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 6.dp),
                     )
-                    if (modelStatus != null) {
+                    if (endpoint.isBlank()) {
+                        OutlinedTextField(
+                            value = model,
+                            onValueChange = onModel,
+                            label = { Text("Model (optional)") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                        )
                         Text(
-                            modelStatus,
+                            "Anthropic key: Claude by default. OpenRouter key (sk-or-...): free Nemotron by default - paste another model id to change it. Only models verified free on OpenRouter are accepted.",
                             style = MaterialTheme.typography.bodySmall,
-                            color = accentText,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 6.dp),
                         )
+                        if (modelStatus != null) {
+                            Text(
+                                modelStatus,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = accentText,
+                                modifier = Modifier.padding(top = 6.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -1080,45 +1259,55 @@ fun SettingsContent(
     }
 }
 
-/** Current-profile switcher above the sections: tap to reveal profiles, the active one marked. */
+/** Current-profile switcher: a calm container with a dropdown arrow, tap to reveal profiles. */
 @Composable
 fun ProfileSwitcherRow(
     activeProfile: String?,
-    profiles: Set<String>,
+    profiles: List<String>,
     onToggleProfile: (String?) -> Unit,
     roundedFont: androidx.compose.ui.text.font.FontFamily?,
     initiallyOpen: Boolean = false,
 ) {
     var open by rememberSaveable { mutableStateOf(initiallyOpen) }
     Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.fillMaxWidth().clickable { open = !open }.padding(vertical = 12.dp),
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    "Current profile",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    activeProfile ?: "Normal",
-                    fontFamily = roundedFont,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onBackground,
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable { open = !open }
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Current profile",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        activeProfile ?: "Normal",
+                        fontFamily = roundedFont,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+                Icon(
+                    if (open) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = if (open) "Hide profiles" else "Show profiles",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Text(
-                if (open) "−" else "+",
-                fontSize = 18.sp,
-                fontFamily = roundedFont,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
         if (open) {
-            Column(modifier = Modifier.padding(start = 2.dp, bottom = 12.dp)) {
-                val options = listOf<String?>(null) + profiles.sorted()
+            Column(modifier = Modifier.padding(start = 6.dp, top = 6.dp, bottom = 12.dp)) {
+                val options = listOf<String?>(null) + profiles
                 options.forEach { p ->
                     val label = p ?: "Normal"
                     val isActive = p == activeProfile
@@ -1129,61 +1318,24 @@ fun ProfileSwitcherRow(
                         fontSize = 15.sp,
                         fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
                         color = if (isActive) accentText else MaterialTheme.colorScheme.onBackground,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { onToggleProfile(p) }.padding(vertical = 6.dp, horizontal = 4.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 48.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onToggleProfile(p) }
+                            .padding(vertical = 12.dp, horizontal = 12.dp),
                     )
                 }
                 Text(
-                    "Create and edit profiles in Focus profiles below.",
+                    "Create and edit profiles below.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 2.dp),
+                    modifier = Modifier.padding(top = 4.dp, start = 12.dp),
                 )
             }
         }
+        Spacer(Modifier.height(4.dp))
         WobblyDivider()
-    }
-}
-
-/** One collapsible settings section in the calm paper style: rounded-font header, wobbly divider. */
-@Composable
-fun SettingsSection(
-    title: String,
-    initiallyExpanded: Boolean,
-    expandAll: Boolean,
-    roundedFont: androidx.compose.ui.text.font.FontFamily?,
-    showDivider: Boolean = true,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    var expanded by rememberSaveable { mutableStateOf(initiallyExpanded || expandAll) }
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { expanded = !expanded }
-                .padding(vertical = 12.dp),
-        ) {
-            Text(
-                title,
-                fontFamily = roundedFont,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                if (expanded) "\u2212" else "+",
-                fontSize = 18.sp,
-                fontFamily = roundedFont,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        if (expanded) {
-            Column(modifier = Modifier.padding(start = 2.dp, bottom = 12.dp)) {
-                content()
-            }
-        }
-        if (showDivider) WobblyDivider()
     }
 }
 
@@ -1207,17 +1359,23 @@ fun WobblyDivider() {
     }
 }
 
-/** Hand-drawn checkbox row in the paper style. */
+/** Hand-drawn checkbox row in the paper style: full-width padded tap target. */
 @Composable
 fun PaperCheckbox(
     checked: Boolean,
     onToggle: () -> Unit,
     label: String,
     roundedFont: androidx.compose.ui.text.font.FontFamily?,
+    modifier: Modifier = Modifier,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().clickable { onToggle() }.padding(vertical = 6.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable { onToggle() }
+            .padding(vertical = 10.dp, horizontal = 8.dp),
     ) {
         Canvas(modifier = Modifier.size(18.dp)) {
             drawRoundRect(
@@ -1239,13 +1397,23 @@ fun PaperCheckbox(
     }
 }
 
-/** Home dock slot: a small sticky note with the app name, per owner request. */
+/** Home dock slot: a small sticky note with the app name, per owner request. Press shrinks
+ *  and dims it slightly, so a tap reads as a tap without breaking the calm style. */
 @Composable
 fun StickyNote(app: AppEntry, fontFamily: androidx.compose.ui.text.font.FontFamily?, tilt: Float, onLaunch: () -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.94f else 1f, label = "notePress")
     Box(
         modifier = Modifier
-            .graphicsLayer { rotationZ = tilt }
-            .clickable { onLaunch() },
+            .graphicsLayer {
+                rotationZ = tilt
+                scaleX = scale
+                scaleY = scale
+                alpha = if (pressed) 0.82f else 1f
+            }
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(interactionSource = interactionSource, indication = null) { onLaunch() },
     ) {
         Surface(
             shape = RoundedCornerShape(6.dp),
