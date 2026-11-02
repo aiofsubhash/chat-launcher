@@ -24,6 +24,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.isRoot
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.hasSetTextAction
@@ -449,6 +450,95 @@ class ChatHomeScreenshotTest {
         val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
         org.junit.Assert.assertNotNull("an open request was dispatched", started)
         org.junit.Assert.assertEquals("com.instagram.android", started.component?.packageName)
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Reasoning profile: tapping an entertainment note shows the intervention pause with an
+     *  immediate "Just open it" escape; choosing it dispatches the real launch. */
+    @Test
+    fun reasoningInterventionGate() {
+        val prefs = composeRule.activity.getSharedPreferences("chat_launcher", android.content.Context.MODE_PRIVATE)
+        prefs.edit()
+            .putString("active_profile", "Reasoning")
+            .putStringSet("profile_allow_Reasoning", setOf("com.instagram.android"))
+            .commit()
+        composeRule.activityRule.scenario.recreate()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Instagram").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Just open it").assertExists()
+        composeRule.onRoot().captureRoboImage()
+        composeRule.onNodeWithTag("reasoning_open_anyway", useUnmergedTree = true).performClick()
+        composeRule.waitForIdle()
+        val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
+        org.junit.Assert.assertNotNull("Just open it dispatches the launch", started)
+        org.junit.Assert.assertEquals("com.instagram.android", started.component?.packageName)
+        prefs.edit().remove("active_profile").remove("profile_allow_Reasoning").commit()
+    }
+
+    /** Reasoning onboarding: grid-background popup dialog with the first question. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun reasoningOnboarding() {
+        composeRule.activity.setContent {
+            MaterialTheme(colorScheme = calmColors) {
+                ReasoningOnboardingDialog(roundedFont = null, wobbly = true, onDone = {}, onSkip = {})
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("What do you want more time for?").assertExists()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Reasoning intervention dialog with a personal goal nudge. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun reasoningIntervention() {
+        composeRule.activity.setContent {
+            MaterialTheme(colorScheme = calmColors) {
+                ReasoningInterventionDialog(
+                    app = AppEntry("Instagram", "com.instagram.android", Intent()),
+                    goal = "drums",
+                    roundedFont = null,
+                    wobbly = true,
+                    onOpen = {},
+                    onLater = {},
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Just open it").assertExists()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Context tab: read-only answers from the Reasoning onboarding. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsPageContext() {
+        val entries = listOf(
+            UserContextStore.Entry("What do you want more time for?", "drums", 1762074600000),
+            UserContextStore.Entry("What does your phone get in the way of?", "sleep", 1762074610000),
+        )
+        composeRule.activity.setContent {
+            MaterialTheme(colorScheme = calmColors) {
+                SettingsContent(
+                    key = "", onKey = {},
+                    profileName = "", onProfileName = {},
+                    selected = emptySet(), onSelected = {},
+                    dockSelected = emptySet(), onDockSelected = {},
+                    profiles = setOf("Focus", "Work", "Reasoning"),
+                    onToggleProfile = {}, onDeleteProfile = {},
+                    editingProfile = null, onEditProfile = {},
+                    gridWobbly = true, onGridWobbly = {},
+                    activeProfile = null,
+                    apps = emptyList(),
+                    contextEntries = entries,
+                    initialSection = "context",
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("drums").assertExists()
         composeRule.onRoot().captureRoboImage()
     }
 }
