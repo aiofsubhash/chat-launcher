@@ -723,8 +723,11 @@ fun ChatHome(
             onDragEnd = {
                 when {
                     dragX <= -80 && activeProfile == null -> showAppGrid = true
-                    dragX >= 80 && activeProfile != null -> Unit // camera is profile-gated
-                    dragX >= 80 -> swipeCameraApp?.let { launchApp(it) }
+                    dragX >= 80 -> swipeCameraApp?.let { cam ->
+                        // Respect the active profile's allow-list (owner 22:53); no auto photo.
+                        val profile = activeProfile
+                        if (profile == null || cam.identityKey in router.effectiveAllowed(profile, workKeys)) launchApp(cam)
+                    }
                 }
                 dragX = 0f
             },
@@ -929,7 +932,7 @@ fun ChatHome(
     if (showAppGrid) {
         // Normal mode only (gesture is gated); right swipe or a tap closes it.
         AppGridOverlay(
-            apps = allInstalled,
+            apps = allInstalled.sortedBy { it.label.lowercase() },
             fontFamily = roundedFont,
             onLaunch = { app -> showAppGrid = false; launchApp(app) },
             onDismiss = { showAppGrid = false },
