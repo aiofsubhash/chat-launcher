@@ -52,6 +52,16 @@ class PairingTest {
     }
 
     @Test
+    fun trustedEndpointRequiresExactPinnedUrl() {
+        assertTrue(LlmClient.isTrustedProxyEndpoint(LlmClient.DEFAULT_CHAT_ENDPOINT))
+        assertFalse(LlmClient.isTrustedProxyEndpoint("https://chat-launcher-proxy.aiofsubhash.workers.dev/v1/chat/completions?x=1"))
+        assertFalse(LlmClient.isTrustedProxyEndpoint("https://chat-launcher-proxy.aiofsubhash.workers.dev/v1/chat/completions#f"))
+        assertFalse(LlmClient.isTrustedProxyEndpoint("https://chat-launcher-proxy.aiofsubhash.workers.dev:8443/v1/chat/completions"))
+        assertFalse(LlmClient.isTrustedProxyEndpoint("https://chat-launcher-proxy.aiofsubhash.workers.dev/v1/other"))
+        assertFalse(LlmClient.isTrustedProxyEndpoint("https://user@chat-launcher-proxy.aiofsubhash.workers.dev/v1/chat/completions"))
+    }
+
+    @Test
     fun redeem200MissingFieldsRejected() {
         assertEquals(LlmClient.RedeemResult.InvalidShape, LlmClient.parseRedeemResponse(200, """{"endpoint":"${LlmClient.DEFAULT_CHAT_ENDPOINT}"}"""))
         assertEquals(LlmClient.RedeemResult.InvalidShape, LlmClient.parseRedeemResponse(200, "not json"))
