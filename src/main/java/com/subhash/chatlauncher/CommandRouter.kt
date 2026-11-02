@@ -154,7 +154,10 @@ class CommandRouter(
         if (handle != null && app.launch.component != null) {
             la.startMainActivity(app.launch.component, handle, null, null)
         } else {
-            activity.startActivity(app.launch)
+            // From a singleTask HOME activity a flag-less intent can stack the target inside
+            // the launcher's own task (suspected in the old build's "Opening" but never
+            // foreground report). NEW_TASK keeps the fallback on launcher semantics.
+            activity.startActivity(Intent(app.launch).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
         true
     } catch (e: Exception) {
@@ -277,9 +280,11 @@ class CommandRouter(
             if (result.app.packageName == TIMER_KEY) {
                 if (launchTimer()) "Opening the clock app" else "No clock app on this phone handles timers."
             } else {
-                // "Opening" is a dispatch truth: the OS accepted the open request; whether the
-                // target actually foregrounds is not observable from here.
-                if (launchAppEntry(result.app)) "Opening ${result.app.displayLabel}"
+                // Dispatch truth, stated as dispatch: the OS accepted the open request, but
+                // whether the target actually foregrounds is not observable from here (the
+                // old build's stuck "Opening Instagram" report). Terminal + offers retry.
+                if (launchAppEntry(result.app))
+                    "Asked Android to open ${result.app.displayLabel} - if it doesn't appear, tell me and I'll try again."
                 else launchFailureMessage(result.app)
             }
         }
