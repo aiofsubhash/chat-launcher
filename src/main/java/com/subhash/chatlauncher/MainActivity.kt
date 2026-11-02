@@ -1015,7 +1015,8 @@ fun SettingsDialog(
     onClose: () -> Unit,
 ) {
     var key by remember { mutableStateOf(router.apiKey) }
-    var endpoint by remember { mutableStateOf(router.chatEndpoint) }
+    // Prefilled with the fixed public proxy URL; a credential only arrives via pairing (no key entry).
+    var endpoint by remember { mutableStateOf(router.chatEndpoint.ifBlank { LlmClient.DEFAULT_CHAT_ENDPOINT }) }
     var model by remember { mutableStateOf(router.model) }
     var profileName by remember { mutableStateOf("") }
     var selected by remember { mutableStateOf(setOf<String>()) }
