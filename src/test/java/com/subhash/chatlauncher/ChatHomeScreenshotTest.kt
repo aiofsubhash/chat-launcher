@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
@@ -785,6 +786,65 @@ class ChatHomeScreenshotTest {
         composeRule.onRoot().performTouchInput { swipeLeft() }
         composeRule.waitForIdle()
         composeRule.onNodeWithText("All apps").assertExists()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    private fun typeLongQuery() {
+        composeRule.onNodeWithText("write what you want to do").performTextInput("what is the capital of france and why did it become the capital explain in detail")
+        composeRule.waitForIdle()
+    }
+
+    /** Query shortcuts: long typed queries show ChatGPT / Claude / Google prefill chips. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun longQueryShowsQueryShortcuts() {
+        typeLongQuery()
+        composeRule.onNodeWithContentDescription("ChatGPT").assertExists()
+        composeRule.onNodeWithContentDescription("Claude").assertExists()
+        composeRule.onNodeWithContentDescription("Google").assertExists()
+    }
+
+    /** Short input stays clean: no query-shortcut chips below the threshold. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun shortQueryHidesQueryShortcuts() {
+        composeRule.onNodeWithText("write what you want to do").performTextInput("hi")
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("ChatGPT").assertDoesNotExist()
+    }
+
+    /** ChatGPT chip dispatches an ACTION_VIEW with the verified chatgpt.com/?q= prefill contract. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun chatGptChipDispatchesPrefillIntent() {
+        typeLongQuery()
+        composeRule.onNodeWithContentDescription("ChatGPT").performClick()
+        composeRule.waitForIdle()
+        val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
+        org.junit.Assert.assertNotNull("ChatGPT chip dispatches a view intent", started)
+        org.junit.Assert.assertEquals(android.content.Intent.ACTION_VIEW, started.action)
+        val url = started.dataString ?: ""
+        org.junit.Assert.assertTrue("prefill URL uses chatgpt.com/?q=, got $url", url.startsWith("https://chatgpt.com/?q="))
+        org.junit.Assert.assertTrue("query text is carried in the URL, got $url", url.contains("capital%20of%20france"))
+    }
+
+    /** Claude chip dispatches the verified claude.ai/new?q= prefill contract. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun claudeChipDispatchesPrefillIntent() {
+        typeLongQuery()
+        composeRule.onNodeWithContentDescription("Claude").performClick()
+        composeRule.waitForIdle()
+        val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
+        org.junit.Assert.assertNotNull("Claude chip dispatches a view intent", started)
+        org.junit.Assert.assertTrue("prefill URL uses claude.ai/new?q=, got ${started.dataString}", (started.dataString ?: "").startsWith("https://claude.ai/new?q="))
+    }
+
+    /** Render: query-shortcut chips under a long typed query. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun queryShortcutChips() {
+        typeLongQuery()
         composeRule.onRoot().captureRoboImage()
     }
 
