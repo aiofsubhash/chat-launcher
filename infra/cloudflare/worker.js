@@ -14,9 +14,8 @@ const UPSTREAM_TIMEOUT_MS_DEFAULT = 30000;
 const DAILY_CAP = 50;
 const MINUTE_CAP = 6;
 
-// No provider 'only' allow-list: any pinned list is an ungrounded provider selection.
-// The fixed :free model plus all-zero price caps and no fallbacks enforce free-only:
-// OpenRouter must route to an endpoint whose price is exactly 0 or the request fails.
+// Server-reviewed provider pin plus all-zero caps and no external fallbacks.
+// A route must pass fresh endpoint metadata checks before an inference attempt.
 const FREE_ONLY_PROVIDER = {
   max_price: { prompt: 0, completion: 0, request: 0, image: 0 },
   allow_fallbacks: false,
@@ -48,10 +47,10 @@ class HttpError extends Error {
   }
 }
 
-function errorResponse(status, message) {
+function errorResponse(status, message, safeHeaders = {}) {
   return new Response(JSON.stringify({ error: { message, type: 'proxy_error' } }), {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...safeHeaders },
   });
 }
 
@@ -143,6 +142,7 @@ async function handleRequest(request, env, ctx, now = new Date(), catalog = CATA
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let upstream;
     let lastCategory = 'no_eligible_route';
+    let safeHeaders = {};
     try {
       const config = await env.QUOTA_DB.prepare('SELECT model, provider FROM model_routes WHERE enabled = 1 ORDER BY priority, model LIMIT 16').all();
       const routes = [...new Map((config.results || []).map(r => [r.model, r])).values()];
@@ -171,12 +171,19 @@ async function handleRequest(request, env, ctx, now = new Date(), catalog = CATA
         } catch (e) { if (controller.signal.aborted) throw e; lastCategory='upstream_unavailable'; continue; }
         if (upstream.ok && upstream.body && (upstream.headers.get('content-type') || '').includes('text/event-stream')) break;
         const status = upstream.status;
+        if (status === 429) {
+          safeHeaders = {'X-Proxy-RateLimit-Origin': upstream.headers.has('X-RateLimit-Limit') ? 'platform' : 'unknown'};
+          for (const name of ['Retry-After','X-RateLimit-Limit','X-RateLimit-Remaining','X-RateLimit-Reset']) {
+            const v=upstream.headers.get(name);
+            if (v && /^\d{1,15}$/.test(v)) safeHeaders[name]=v;
+          }
+        }
         lastCategory = status === 401 ? 'upstream_auth' : status === 402 ? 'upstream_billing' : status === 429 ? 'upstream_rate_limit' : 'upstream_unavailable';
         if (upstream.body) await upstream.body.cancel().catch(()=>{});
         upstream = null;
         if (status === 401 || status === 402 || ![404,408,429].includes(status) && status < 500) break;
       }
-      if (!upstream) { clearTimeout(timer); return errorResponse(502,lastCategory); }
+      if (!upstream) { clearTimeout(timer); return errorResponse(502,lastCategory,safeHeaders); }
     } catch (err) {
       clearTimeout(timer);
       if (controller.signal.aborted) return errorResponse(504,'request timed out');
@@ -223,11 +230,12 @@ export { handleRequest };
 const CATALOG = Object.freeze({
   'xingchen-agi/xing4.0-29b-a4b:free': {provider:'phala'},
 });
+function isZeroPrice(v) { return (typeof v === 'number' || typeof v === 'string' && v.trim() !== '') && Number(v) === 0; }
 function eligibleEndpoint(meta, route) {
   if (!route.model.endsWith(':free') || meta?.data?.id !== route.model) return false;
   return (meta.data.endpoints || []).some(e => e.tag === route.provider && e.model_id === route.model &&
-    e.pricing && ['prompt','completion'].every(k => typeof e.pricing[k] !== 'undefined' && Number(e.pricing[k]) === 0) &&
-    Object.entries(e.pricing).every(([k,v]) => k === 'discount' || Number(v) === 0));
+    e.pricing && ['prompt','completion'].every(k => isZeroPrice(e.pricing[k])) &&
+    Object.entries(e.pricing).every(([k,v]) => k === 'discount' || isZeroPrice(v)));
 }
 async function hash(value) {
   const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value));
@@ -253,7 +261,8 @@ async function redeem(request,env) {
         WHERE pairing_limits.window != excluded.window OR pairing_limits.count < ? RETURNING count`).bind(key,minute,cap).first();
       if (!r) return errorResponse(429,'pairing rate limit');
     }
-    const body=JSON.parse(await readBoundedBody(request,1024));
+    let body;
+    try { body=JSON.parse(await readBoundedBody(request,1024)); } catch(e) { if(e instanceof HttpError) throw e; return errorResponse(400,'invalid pairing request'); }
     if (!body || typeof body.code !== 'string' || !/^[a-f0-9]{64}$/.test(body.code)) return errorResponse(400,'invalid pairing request');
     const credential=randomCredential();
     // Atomic transaction: conditional credential insertion and code consumption.
