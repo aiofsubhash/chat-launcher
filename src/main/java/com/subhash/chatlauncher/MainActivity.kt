@@ -752,8 +752,20 @@ fun ChatHome(
     // Small available height (IME open, tiny viewport): collapse the owner-mandated 8x
     // date-to-notes gap so the composer and Send stay fully visible (00:08 render showed the
     // Send label clipped at h420dp). Normal heights keep the full 144dp gap (owner 21:54).
-    val tightHeight = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp < 560
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 10.dp)) {
+    // Inset-aware: an open IME subtracts from the usable height, so the collapse rules
+    // respond to the actual inset, not just the screen size (main 01:33 IME gate).
+    val homeDensity = androidx.compose.ui.platform.LocalDensity.current
+    val imeBottomDp = with(homeDensity) { WindowInsets.ime.getBottom(this).toDp().value }
+    val availableHeightDp = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp - imeBottomDp
+    val tightHeight = availableHeightDp < 560
+    // Extremely tight (small viewport with keyboard open): the date yields so the dock,
+    // composer and Send stay reachable.
+    val veryTightHeight = availableHeightDp < 400
+    // imePadding: respond to the IME window inset (keyboard) so the composer, Send,
+    // query chips and dock stay above it. With adjustResize the resized window already
+    // reports a zero IME bottom, so this is a no-op on the ordinary path and only pays
+    // out where the inset actually arrives (transient resize, non-resizing windows).
+    Column(modifier = Modifier.fillMaxSize().imePadding().padding(horizontal = 14.dp, vertical = 10.dp)) {
         // Top bar: Fresh chat left, settings right
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = {
@@ -778,7 +790,9 @@ fun ChatHome(
             }
         }
 
-        // Date + time below the top bar, larger per owner request
+        // Date + time below the top bar, larger per owner request. It yields only when
+        // the usable height is extremely tight (small viewport + keyboard inset).
+        if (!veryTightHeight) {
         Text(
             now,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -787,6 +801,7 @@ fun ChatHome(
             textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
         )
+        }
 
         if (pairStatus != null) {
             Text(
@@ -803,7 +818,7 @@ fun ChatHome(
         // when the first message lands. The conversation lives in a bottom-only section
         // that scrolls inside itself; it never takes over the screen.
         // Date-to-notes gap is 8x the original 18dp per owner voice 21:54.
-        DockRow(Modifier.fillMaxWidth().padding(top = if (tightHeight) 16.dp else 144.dp))
+        DockRow(Modifier.fillMaxWidth().padding(top = if (veryTightHeight) 8.dp else if (tightHeight) 16.dp else 144.dp))
         if (messages.isEmpty()) {
             Spacer(modifier = Modifier.weight(1f))
         } else {
@@ -884,7 +899,9 @@ fun ChatHome(
                 BasicTextField(
                     value = input,
                     onValueChange = { input = it },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 88.dp),
+                    // Extremely tight usable height (small viewport + IME inset): compact
+                    // composer so the chips row and Send stay visible (main 01:33 IME gate).
+                    modifier = Modifier.fillMaxWidth().heightIn(min = if (veryTightHeight) 48.dp else 88.dp),
                     textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp, fontFamily = roundedFont),
                     // Owner 23:10: no blinking caret in Focus mode; Normal mode keeps it.
                     cursorBrush = androidx.compose.ui.graphics.SolidColor(
