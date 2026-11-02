@@ -109,8 +109,8 @@ class CommandRouterTest {
             "Chat Launcher" to "com.subhash.chatlauncher",
             "Slack" to "com.slack",
         )
-        val chosen = CommandRouter.shareTargetsOf(resolved, "com.subhash.chatlauncher", setOf("com.slack"))
-        // Only genuinely installed/resolved apps appear; self and focus-hidden entries never do.
+        // Focus allows Gmail + WhatsApp only: self and not-allowed entries (Slack) never appear.
+        val chosen = CommandRouter.shareTargetsOf(resolved, "com.subhash.chatlauncher", setOf("com.whatsapp", "com.google.android.gm"))
         assertEquals(listOf("Gmail" to "com.google.android.gm", "WhatsApp" to "com.whatsapp"), chosen)
     }
 
@@ -130,11 +130,11 @@ class CommandRouterTest {
         val personal = AppEntry("Gmail", "com.google.android.gm", android.content.Intent(), isWork = false)
         assertEquals("com.google.android.gm", personal.identityKey)
         assertEquals("com.google.android.gm@work:unknown", work.identityKey) // null handle in unit tests
-        // Focus profiles store identity keys, so hiding personal Gmail does not hide work Gmail.
+        // Focus profiles store identity keys, so allowing personal Gmail does not allow work Gmail.
         val r = router()
         r.saveProfile("Focus", setOf(personal.identityKey))
-        assertEquals(setOf("com.google.android.gm"), r.profileHidden("Focus"))
-        assert(work.identityKey !in r.profileHidden("Focus"))
+        assertEquals(setOf("com.google.android.gm"), r.profileAllowed("Focus"))
+        assert(work.identityKey !in r.profileAllowed("Focus"))
     }
 
     @Test
