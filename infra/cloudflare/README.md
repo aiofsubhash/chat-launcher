@@ -1,24 +1,11 @@
-# Connect AI proxy (Cloudflare Worker)
+# Launcher private AI proxy v4
 
-Holds the upstream OpenRouter key server-side so the launcher app (and its tester) never
-needs it. The app sends a per-tester pairing credential; the Worker fixes the free model
-`nvidia/nemotron-3-ultra-550b-a55b:free`, enforces a global quota, and fails closed.
+Stable SSE-only POST /v1/chat/completions. One current nonsensitive user text only, no history/system prompt.4000 chars,16KiB body,600output tokens,total30s. Auth Bearer or X-Tester-Token. Free-only server route catalog and D1 model_routes order/enable. Unknown pairs fail closed. Current qualified catalog: xingchen-agi/xing4.0-29b-a4b:free via phala, zero retention/no training routing required. No APK model list or upstream secret. Adding newly reviewed routes needs server change, never APK. D1 operators can disable/reorder existing reviewed routes without source change.
 
-- `worker.js` - the Worker (no dependencies).
-- `schema.sql` - D1 quota table (`QUOTA_DB` binding, database `chat-launcher-quota`).
-- `worker.test.js` - `node --test worker.test.js` (10 tests, no dependencies).
-- `wrangler.toml` - non-secret config; deployer sets `OPENROUTER_API_KEY` and
-  `TESTER_TOKEN` (single shared tester secret).
+Every inference attempt uses atomic50/day6/minute global quota. Up to2 attempts pre-stream only, per-attempt quota, live endpoint price/provider validation, zero price caps, pinned provider/no external fallback, data_collection deny + zdr.401/402 stop; availability failures may try next approved route. No retry after SSE starts. With only1 qualified route enabled, there is no second working fallback yet. Safe errors expose status category only, never upstream body/key/prompt. Logs disabled.
 
-Contract: `POST /v1/chat/completions` with `Authorization: Bearer <credential>` or
-`X-Tester-Token: <credential>` (or `Authorization: Bearer <credential>`); body
-`{ messages: [{role: "user", content}] }` with EXACTLY one user text message - no client
-system prompts, history, model or provider overrides.
-`GET /health` is open. The response contract is SSE-only: the proxy always streams
-(`stream: true` upstream); clients consume `text/event-stream`. Bounds: one message,
-4000 chars, 600 max tokens, 30s upstream lifetime timeout (covers the whole stream, not
-just headers), 50 requests/day and 6/minute globally, enforced by one atomic conditional
-UPDATE on a singleton D1 row.
-Free-only is enforced server-side: fixed `:free` model, `provider.max_price`
-{prompt: 0, completion: 0, request: 0, image: 0}, `allow_fallbacks: false`. There is no
-pinned provider list - routing must satisfy a zero price or the request fails.
+Pairing: POST /v1/pair/redeem {code:64hex} returns {credential,endpoint}; code expires15min, operator-issued only, SHA256 hash stored, atomic D1 batch insert credential/delete code. Per-install credential256bits, hash stored, revocable. No public enrollment. Rate gate global100/min and privacy hashed IP buckets10/min (collisions deliberately share quota); fixed256IP buckets bounds storage. Keys remain encrypted Worker secrets.
+
+Apply schema.sql (idempotent; v4 additions are additive), preserves quota singleton. Issuance must generate secret code privately, write only SHA256hash+expiry to pairing_codes via supported operator flow, deliver code as one-tap app pairing URL privately; never commit raw code or credential. Code revocation DELETE by hash; install revocation set revoked1 by hash. No code issuance public endpoint.
+
+19 Node tests including real SQLite race + pairing single-use. Run node --test worker.test.js (Node22).
