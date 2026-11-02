@@ -54,6 +54,17 @@ class CommandRouter(
             ?: DEFAULT_DOCK_APPS
         set(v) = prefs.edit().putString("dock_apps", v.take(4).joinToString(",")).apply()
 
+    /** Normal-mode dock keys: stored choices, with stale stored keys falling back to defaults so
+     *  the dock is never blank by accident (device bug 22:53); an intentionally emptied dock stays empty. */
+    fun normalDockKeys(installedKeys: Set<String>): List<String> {
+        val stored = prefs.getString("dock_apps", null)
+        if (stored == null) return DEFAULT_DOCK_APPS.filter { it in installedKeys }
+        val keys = stored.split(",").filter { it.isNotBlank() }
+        if (keys.isEmpty()) return emptyList()
+        val resolved = keys.filter { it == TIMER_KEY || it in installedKeys }
+        return resolved.ifEmpty { DEFAULT_DOCK_APPS.filter { it in installedKeys } }
+    }
+
     // ---- Profiles: allow-lists. Built-ins: Focus (Timer only by default), Work (managed
     // work apps + additions). Built-ins always exist and cannot be deleted.
 
@@ -243,6 +254,21 @@ class CommandRouter(
             } else {
                 Result.Reply("No profile called '$name'. Profiles: ${profileNames().joinToString(", ")}")
             }
+        }
+
+        // Exact app-name match wins before message parsing (device bug 22:48): typing exactly
+        // an installed app's name opens it - 'WhatsApp' alone is never a message attempt.
+        // Explicit 'send a message...' commands still parse below (they are not exact app names).
+        run {
+            val distinct = suggestions.distinctBy { it.identityKey }
+            val exact = distinct.filter { it.label.equals(input, true) || it.packageName.equals(input, true) }
+            if (exact.size > 1) return Result.ChooseApp(exact, input)
+            if (exact.size == 1) return Result.Launch(exact.first())
+        }
+
+        // Explicit note intent stays local (owner 22:52); other open text becomes conversation.
+        MessageIntents.parseNote(input)?.let { note ->
+            return Result.Reply("Noted - saved on this phone: $note")
         }
 
         // Message drafts: deterministic, no AI. Missing text/channel is asked inline.
