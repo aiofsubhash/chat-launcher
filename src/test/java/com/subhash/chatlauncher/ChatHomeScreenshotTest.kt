@@ -815,6 +815,7 @@ class ChatHomeScreenshotTest {
     fun shortQueryHidesQueryShortcuts() {
         typeWords(4)
         composeRule.onNodeWithContentDescription("ChatGPT").assertDoesNotExist()
+        composeRule.onNodeWithText("word1 word2 word3 word4").performTextClearance()
         typeWords(5)
         composeRule.onNodeWithContentDescription("ChatGPT").assertExists()
     }
