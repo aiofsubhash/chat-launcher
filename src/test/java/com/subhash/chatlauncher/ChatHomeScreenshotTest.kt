@@ -32,6 +32,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.printToLog
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.onRoot
@@ -491,12 +492,20 @@ class ChatHomeScreenshotTest {
         composeRule.onNodeWithText("write what you want to do").performTextInput("insta")
         composeRule.onNodeWithText("Send").performClick()
         composeRule.waitForIdle()
-        // No launch yet - the pause dialog appears instead.
-        composeRule.onNodeWithText("Just open it").assertExists()
+        composeRule.onRoot().printToLog("TYPEDGATE")
         org.junit.Assert.assertNull(
             "typed command must not launch before the pause",
             Shadows.shadowOf(composeRule.activity).nextStartedActivity
         )
+        // No launch yet - the pause dialog appears instead.
+        try {
+            composeRule.onNodeWithText("Just open it").assertExists()
+        } catch (e: AssertionError) {
+            val prop = androidx.compose.ui.semantics.SemanticsProperties.Text
+            val texts = composeRule.onAllNodes(androidx.compose.ui.test.isRoot().not(), useUnmergedTree = true)
+                .fetchSemanticsNodes().mapNotNull { n -> if (n.config.contains(prop)) n.config[prop].joinToString(" ") { it.text } else null }
+            throw AssertionError("pause dialog missing; visible texts: " + texts.joinToString(" | ").take(600), e)
+        }
         // Typed override honors immediately.
         composeRule.onNodeWithText("write what you want to do").performTextInput("just open it")
         composeRule.onNodeWithText("Send").performClick()
@@ -521,7 +530,7 @@ class ChatHomeScreenshotTest {
     fun reasoningOnboarding() {
         composeRule.activity.setContent {
             MaterialTheme(colorScheme = calmColors) {
-                ReasoningOnboardingDialog(roundedFont = null, wobbly = true, onDone = {}, onSkip = {})
+                ReasoningOnboardingContent(roundedFont = null, wobbly = true, onDone = {}, onSkip = {})
             }
         }
         composeRule.waitForIdle()
