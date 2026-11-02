@@ -843,7 +843,11 @@ fun ChatHome(
                     onValueChange = { input = it },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 88.dp),
                     textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp, fontFamily = roundedFont),
-                    cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.onSurface),
+                    // Owner 23:10: no blinking caret in Focus mode; Normal mode keeps it.
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(
+                        if (activeProfile == CommandRouter.FOCUS) androidx.compose.ui.graphics.Color.Transparent
+                        else MaterialTheme.colorScheme.onSurface
+                    ),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { send() }),
                     decorationBox = { inner ->
