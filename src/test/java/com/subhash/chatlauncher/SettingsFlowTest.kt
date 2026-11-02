@@ -6,12 +6,14 @@ import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
@@ -112,7 +114,11 @@ class SettingsFlowTest {
         openFocusSettings()
         composeRule.onAllNodesWithText("Edit")[3].performClick() // Study (Focus, Work, Sleep, Study)
         composeRule.onNodeWithText("Apps \"Study\" can open:").assertExists()
-        composeRule.onNodeWithTag("profile_app_com.whatsapp").performClick() // add WhatsApp to Study's allowed apps
+        // Dispatch the semantics click action directly: inside the settings LazyColumn this
+        // row can report zero bounds under Robolectric's measurement, which makes the
+        // coordinate-based performClick() tap (0,0) instead of the row.
+        composeRule.onNodeWithTag("profile_app_com.whatsapp", useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.OnClick) // add WhatsApp to Study's allowed apps
         composeRule.onNodeWithText("Save").performClick()
         assertEquals(setOf("com.spotify.music", "com.whatsapp"), router.profileAllowed("Study"))
     }
