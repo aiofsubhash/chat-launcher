@@ -871,6 +871,29 @@ class ChatHomeScreenshotTest {
         composeRule.onRoot().captureRoboImage()
     }
 
+    /** Render: query-shortcut chips, dark theme. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun queryShortcutChipsDark() {
+        val prefs = ApplicationProvider.getApplicationContext<android.content.Context>().getSharedPreferences("chat_launcher", 0)
+        prefs.edit().putString("theme_mode", "dark").commit()
+        composeRule.activityRule.scenario.recreate()
+        composeRule.waitForIdle()
+        typeLongQuery()
+        composeRule.onRoot().captureRoboImage()
+        prefs.edit().remove("theme_mode").commit()
+    }
+
+    /** Injected small available height (proxy for an open IME shrinking the viewport; a real
+     *  keyboard stays a device-only check): composer field and Send must stay visible. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h420dp-xxhdpi")
+    fun composerSmallAvailableHeight() {
+        composeRule.onNodeWithText("write what you want to do").assertIsDisplayed()
+        composeRule.onNodeWithText("Send").assertIsDisplayed()
+        composeRule.onRoot().captureRoboImage()
+    }
+
     /** Owner 22:53: swipe left opens the full app grid in Normal mode. */
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
