@@ -1528,12 +1528,23 @@ fun ReasoningOnboardingDialog(
     onDone: (List<Pair<String, String>>) -> Unit,
     onSkip: () -> Unit,
 ) {
+    Dialog(onDismissRequest = onSkip) {
+        ReasoningOnboardingContent(roundedFont = roundedFont, wobbly = wobbly, onDone = onDone, onSkip = onSkip)
+    }
+}
+
+@Composable
+fun ReasoningOnboardingContent(
+    roundedFont: androidx.compose.ui.text.font.FontFamily?,
+    wobbly: Boolean,
+    onDone: (List<Pair<String, String>>) -> Unit,
+    onSkip: () -> Unit,
+) {
     var step by remember { mutableStateOf(0) }
     var answer by remember { mutableStateOf("") }
     val qa = remember { mutableStateListOf<Pair<String, String>>() }
     val questions = UserContextStore.QUESTIONS
-    Dialog(onDismissRequest = onSkip) {
-        Surface(
+    Surface(
             shape = RoundedCornerShape(18.dp),
             color = MaterialTheme.colorScheme.background,
             modifier = Modifier
@@ -1592,9 +1603,7 @@ fun ReasoningOnboardingDialog(
                 }
             }
         }
-    }
 }
-
 /**
  * Reasoning intervention: one short, personal pause before an entertainment app opens.
  * Playful, not a gatekeeper - "Just open it" opens immediately, every time. No repeated
