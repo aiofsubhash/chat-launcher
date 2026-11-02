@@ -321,6 +321,8 @@ class ChatHomeScreenshotTest {
             MaterialTheme(colorScheme = if (dark) darkCalmColors else calmColors) {
                 SettingsPage(
                     key = "", onKey = {},
+                    // Mirror a fresh unpaired install: the real layer prefills the fixed proxy URL.
+                    endpoint = LlmClient.DEFAULT_CHAT_ENDPOINT, onEndpoint = {},
                     profileName = "", onProfileName = {},
                     selected = if (editing != null) setOf("com.spotify.music") else emptySet(), onSelected = {},
                     dockSelected = setOf("com.google.android.apps.maps", "com.android.chrome", "com.spotify.music", "com.phonepe.app"),
