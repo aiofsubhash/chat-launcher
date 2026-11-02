@@ -149,6 +149,52 @@ class CommandRouterProfileTest {
     }
 
     @Test
+    fun exactAppNameBeatsMessageParsing() {
+        // Device bug 22:48: bare exact 'WhatsApp' was eaten by the message-action detector.
+        val wa = AppEntry("WhatsApp", "com.whatsapp", Intent())
+        val biz = AppEntry("WhatsApp Business", "com.whatsapp.w4b", Intent())
+        for (typed in listOf("WhatsApp", "whatsapp", "WHATSAPP", "  WhatsApp  ")) {
+            val r = router.route(typed, listOf(wa, biz))
+            assertTrue("'$typed' should launch WhatsApp, got $r", r is CommandRouter.Result.Launch)
+            assertEquals("com.whatsapp", (r as CommandRouter.Result.Launch).app.packageName)
+        }
+        // Explicit message commands with an app name inside still draft.
+        val d = router.route("send a message to Sumit on WhatsApp", listOf(wa)) as CommandRouter.Result.DraftMessage
+        assertEquals("Sumit", d.to)
+    }
+
+    @Test
+    fun explicitNoteIntentSavesLocally() {
+        // Owner 22:52: notes only on explicit intent; open text stays conversation.
+        val r = router.route("note buy milk on the way home", emptyList()) as CommandRouter.Result.Reply
+        assertTrue(r.text.startsWith("Noted - saved on this phone"))
+        assertTrue(r.text.contains("buy milk on the way home"))
+        val r2 = router.route("remember this: wifi is bluechair", emptyList()) as CommandRouter.Result.Reply
+        assertTrue(r2.text.contains("wifi is bluechair"))
+        // General text is NOT a note - the chat layer asks the AI when connected.
+        assertTrue((router.route("what's a good birthday gift for my dad", emptyList()) as CommandRouter.Result.Reply).text.isEmpty())
+        // An exact app name still wins over everything.
+        val wa = AppEntry("WhatsApp", "com.whatsapp", Intent())
+        assertTrue(router.route("whatsapp", listOf(wa)) is CommandRouter.Result.Launch)
+    }
+
+    @Test
+    fun normalDockFallsBackOnlyWhenKeysStale() {
+        val installed = setOf("com.whatsapp", "com.android.chrome")
+        // No stored dock: defaults filtered to installed.
+        assertEquals(listOf("com.android.chrome"), router.normalDockKeys(installed))
+        // Intentionally emptied dock stays empty.
+        prefs.edit().putString("dock_apps", "").commit()
+        assertEquals(emptyList<String>(), router.normalDockKeys(installed))
+        // Stored keys: Timer resolves synthetically, unknown keys drop.
+        prefs.edit().putString("dock_apps", "special:timer,com.ghost.app").commit()
+        assertEquals(listOf(CommandRouter.TIMER_KEY), router.normalDockKeys(installed))
+        // All stored keys stale (older build): fall back to defaults, never blank by accident.
+        prefs.edit().putString("dock_apps", "com.ghost.app").commit()
+        assertEquals(listOf("com.android.chrome"), router.normalDockKeys(installed))
+    }
+
+    @Test
     fun focusOnOffRoundTrip() {
         val on = router.route("focus work", emptyList()) as CommandRouter.Result.Reply
         assertTrue(on.text.startsWith("Profile 'Work'"))
