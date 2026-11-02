@@ -236,4 +236,75 @@ object LlmClient {
             .filter { it.optString("type") == "text" }
             .joinToString("\n") { it.getString("text") }
     }
+
+    // ---- Connect AI pairing (one-tap redemption) ----
+    /** The only proxy host this build redeems pairing codes against or accepts endpoints for. */
+    const val TRUSTED_PROXY_HOST = "chat-launcher-proxy.aiofsubhash.workers.dev"
+    const val DEFAULT_CHAT_ENDPOINT = "https://chat-launcher-proxy.aiofsubhash.workers.dev/v1/chat/completions"
+    const val PAIR_REDEEM_URL = "https://chat-launcher-proxy.aiofsubhash.workers.dev/v1/pair/redeem"
+
+    sealed interface RedeemResult {
+        data class Connected(val credential: String, val endpoint: String) : RedeemResult
+        /** 400, or a 200 body missing fields or pointing at an untrusted endpoint. */
+        object InvalidShape : RedeemResult
+        /** 401: code unknown, expired, or already used. */
+        object InvalidOrExpired : RedeemResult
+        object RateLimited : RedeemResult
+        object Unavailable : RedeemResult
+        object NetworkError : RedeemResult
+    }
+
+    /** True only for https URLs on the pinned proxy host - a pairing response must not redirect credentials elsewhere. */
+    fun isTrustedProxyEndpoint(url: String): Boolean = try {
+        val u = java.net.URI(url.trim())
+        u.scheme.equals("https", ignoreCase = true) && u.host != null &&
+            u.host.equals(TRUSTED_PROXY_HOST, ignoreCase = true) && u.userInfo == null
+    } catch (e: Exception) { false }
+
+    /** Maps a redeem HTTP exchange to a result. Never logs; the code is never included in any result. */
+    fun parseRedeemResponse(status: Int, body: String): RedeemResult = when (status) {
+        200 -> try {
+            val json = JSONObject(body)
+            val credential = json.optString("credential", "")
+            val endpoint = json.optString("endpoint", "")
+            if (credential.isBlank() || !isTrustedProxyEndpoint(endpoint)) RedeemResult.InvalidShape
+            else RedeemResult.Connected(credential, endpoint)
+        } catch (e: Exception) { RedeemResult.InvalidShape }
+        400 -> RedeemResult.InvalidShape
+        401 -> RedeemResult.InvalidOrExpired
+        429 -> RedeemResult.RateLimited
+        503 -> RedeemResult.Unavailable
+        else -> RedeemResult.NetworkError
+    }
+
+    internal fun defaultRedeemTransport(url: String, jsonBody: String): Pair<Int, String> {
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            setRequestProperty("Content-Type", "application/json")
+            connectTimeout = 10000
+            readTimeout = 10000
+            doOutput = true
+        }
+        try {
+            conn.outputStream.use { it.write(jsonBody.toByteArray(Charsets.UTF_8)) }
+            val status = conn.responseCode
+            val stream = if (status in 200..299) conn.inputStream else conn.errorStream
+            val body = stream?.bufferedReader()?.readText() ?: ""
+            return status to body
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    /** POST(redeemUrl, jsonBody) -> (status, body); swapped by tests. The redeem URL is a pinned constant. */
+    internal var redeemTransport: (String, String) -> Pair<Int, String> = ::defaultRedeemTransport
+
+    /** Redeem a single-use pairing code for a per-install credential. The code is never logged. */
+    suspend fun redeemPairingCode(code: String): RedeemResult = withContext(Dispatchers.IO) {
+        if (code.isBlank() || code.length > 512) return@withContext RedeemResult.InvalidShape
+        try {
+            val (status, body) = redeemTransport(PAIR_REDEEM_URL, "{\"code\":" + JSONObject.quote(code) + "}")
+            parseRedeemResponse(status, body)
+        } catch (e: Exception) { RedeemResult.NetworkError }
+    }
 }
