@@ -1,6 +1,8 @@
 name = "chat-launcher-proxy"
 main = "worker.js"
 compatibility_date = "2026-11-02"
+workers_dev = true
+preview_urls = false
 
 # Deployer sets secrets: OPENROUTER_API_KEY, TESTER_TOKEN (matches provisioned secret).
 # No secrets live in this file.
