@@ -8,6 +8,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -447,7 +449,11 @@ fun ChatHome(
     fun handleResult(result: CommandRouter.Result) {
         when (result) {
             is CommandRouter.Result.Reply -> {
-                if (result.text.startsWith("Profile '")) activeProfile = router.activeProfile
+                if (result.text.startsWith("Profile '")) {
+                    activeProfile = router.activeProfile
+                    // Typed activation gets the same first-time conversation as the settings path.
+                    if (activeProfile == CommandRouter.REASONING && userContext.isEmpty()) showReasoningOnboarding = true
+                }
                 if (result.text == "Focus mode off.") activeProfile = null
                 addAssistant(result.text)
             }
@@ -1549,11 +1555,14 @@ fun ReasoningOnboardingContent(
             color = MaterialTheme.colorScheme.background,
             modifier = Modifier
                 .fillMaxWidth(0.92f)
-                .height((LocalConfiguration.current.screenHeightDp * 0.75f).dp),
+                // Wrap-content with a max bound: any forced minimum/fixed height fights the
+                // dialog window's own resizing and never settles (AppNotIdle in tests,
+                // relayout churn risk on device). Grows toward 78% as answers accumulate.
+                .heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.78f).dp),
         ) {
             Box {
                 PaperGrid(Modifier.fillMaxSize(), wobbly = wobbly)
-                Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
+                Column(modifier = Modifier.padding(20.dp)) {
                     Text("Before Reasoning turns on", style = MaterialTheme.typography.titleMedium, fontFamily = roundedFont)
                     Text(
                         "Let's talk first - a few short questions. Answers stay on this phone (Settings > Context).",
@@ -1561,7 +1570,7 @@ fun ReasoningOnboardingContent(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 6.dp),
                     )
-                    Column(modifier = Modifier.weight(1f).padding(top = 14.dp)) {
+                    Column(modifier = Modifier.verticalScroll(rememberScrollState()).padding(top = 14.dp)) {
                         qa.forEach { (q, a) ->
                             Text(q, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(a, fontFamily = roundedFont, fontSize = 15.sp, color = MaterialTheme.colorScheme.onBackground,
