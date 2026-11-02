@@ -33,12 +33,14 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.printToLog
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.onRoot
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.core.app.ApplicationProvider
 import com.github.takahirom.roborazzi.captureRoboImage
+import com.github.takahirom.roborazzi.captureScreenRoboImage
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -174,6 +176,32 @@ class ChatHomeScreenshotTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("Instagram (personal)").assertExists()
         composeRule.onNodeWithText("Instagram (work)", substring = true).assertExists()
+    }
+
+    /** System bars wear the paper background with contrasting icons, both themes. */
+    @Test
+    fun systemBarsMatchTheme() {
+        val prefs = composeRule.activity.getSharedPreferences("chat_launcher", android.content.Context.MODE_PRIVATE)
+        prefs.edit().putString("theme_mode", "light").commit()
+        composeRule.activityRule.scenario.recreate()
+        composeRule.waitForIdle()
+        val lightBg = calmColors.background.toArgb()
+        org.junit.Assert.assertEquals(lightBg, composeRule.activity.window.statusBarColor)
+        org.junit.Assert.assertEquals(lightBg, composeRule.activity.window.navigationBarColor)
+        var ctl = androidx.core.view.WindowInsetsControllerCompat(composeRule.activity.window, composeRule.activity.window.decorView)
+        org.junit.Assert.assertTrue("light theme needs dark status icons", ctl.isAppearanceLightStatusBars)
+        org.junit.Assert.assertTrue("light theme needs dark nav icons", ctl.isAppearanceLightNavigationBars)
+
+        prefs.edit().putString("theme_mode", "dark").commit()
+        composeRule.activityRule.scenario.recreate()
+        composeRule.waitForIdle()
+        val darkBg = darkCalmColors.background.toArgb()
+        org.junit.Assert.assertEquals(darkBg, composeRule.activity.window.statusBarColor)
+        org.junit.Assert.assertEquals(darkBg, composeRule.activity.window.navigationBarColor)
+        ctl = androidx.core.view.WindowInsetsControllerCompat(composeRule.activity.window, composeRule.activity.window.decorView)
+        org.junit.Assert.assertFalse("dark theme needs light status icons", ctl.isAppearanceLightStatusBars)
+        org.junit.Assert.assertFalse("dark theme needs light nav icons", ctl.isAppearanceLightNavigationBars)
+        prefs.edit().remove("theme_mode").commit()
     }
 
     /** Dark theme home: the paper palette's dark variant over the same layout. */
@@ -494,7 +522,8 @@ class ChatHomeScreenshotTest {
         composeRule.onNodeWithText("Instagram").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("Just open it").assertExists()
-        composeRule.onRoot().captureRoboImage()
+        // Dialogs live in a second window root: capture the whole screen (home + dialog).
+        captureScreenRoboImage()
         composeRule.onNodeWithTag("reasoning_open_anyway", useUnmergedTree = true).performClick()
         composeRule.waitForIdle()
         val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
@@ -609,7 +638,8 @@ class ChatHomeScreenshotTest {
         }
         composeRule.waitForIdle()
         composeRule.onNodeWithText("Just open it").assertExists()
-        composeRule.onRoot().captureRoboImage()
+        // Dialogs live in a second window root: capture the whole screen (home + dialog).
+        captureScreenRoboImage()
     }
 
     /** Context tab: read-only answers from the Reasoning onboarding. */
