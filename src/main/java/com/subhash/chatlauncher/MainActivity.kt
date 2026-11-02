@@ -46,6 +46,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
@@ -1534,7 +1535,9 @@ fun ReasoningOnboardingDialog(
     onDone: (List<Pair<String, String>>) -> Unit,
     onSkip: () -> Unit,
 ) {
-    Dialog(onDismissRequest = onSkip) {
+    // decorFitsSystemWindows=false: with the default, the TextField's IME/inset listeners
+    // and the dialog window's resizing never settle (composition never idles).
+    Dialog(onDismissRequest = onSkip, properties = DialogProperties(decorFitsSystemWindows = false)) {
         ReasoningOnboardingContent(roundedFont = roundedFont, wobbly = wobbly, onDone = onDone, onSkip = onSkip)
     }
 }
