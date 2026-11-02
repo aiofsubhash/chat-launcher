@@ -86,7 +86,7 @@ class SettingsFlowTest {
     @Test
     fun saveAppliesProfileToggle() {
         openFocusSettings()
-        composeRule.onAllNodesWithText("Use")[2].performClick() // Sleep
+        composeRule.onAllNodesWithText("Use")[3].performClick() // Sleep (Focus, Work, Reasoning, Sleep, Study)
         composeRule.onNodeWithText("Save").performClick()
         assertEquals("Sleep", router.activeProfile)
     }
@@ -112,7 +112,7 @@ class SettingsFlowTest {
     @Test
     fun editProfileAllowedAppsSaves() {
         openFocusSettings()
-        composeRule.onAllNodesWithText("Edit")[3].performClick() // Study (Focus, Work, Sleep, Study)
+        composeRule.onAllNodesWithText("Edit")[4].performClick() // Study (Focus, Work, Reasoning, Sleep, Study)
         composeRule.onNodeWithText("Apps \"Study\" can open:").assertExists()
         // Reachability proof, not just handler wiring: scroll the row into the visible
         // viewport, require real on-screen pixels, then tap it with a real coordinate click.
@@ -151,6 +151,7 @@ class SettingsFlowTest {
         openFocusSettings()
         composeRule.onNodeWithText("Focus").assertExists()
         composeRule.onNodeWithText("Work").assertExists()
+        composeRule.onNodeWithText("Reasoning").assertExists()
         // Only the two custom profiles get a Delete action.
         assertEquals(2, composeRule.onAllNodesWithText("Delete").fetchSemanticsNodes().size)
     }
