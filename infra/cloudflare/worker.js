@@ -1,23 +1,9 @@
 // Chat Launcher - free-tier AI proxy (Cloudflare Worker)
 //
-// Security properties (enforced here, never trusted to the client):
-//   - Requires OPENROUTER_API_KEY (Worker secret). If missing, every AI call fails closed.
-//   - Model is fixed server-side; client-supplied model/provider fields are ignored.
-//   - Contract is SSE-only: the proxy always streams (stream:true upstream); clients read SSE.
-//   - Request body is read with a hard byte cap BEFORE JSON parsing.
-//   - Exactly one user message per call: no client system prompts, no conversation history.
-//   - The free-only gate pins provider routing and price caps server-side:
-//     max_price {prompt: 0, completion: 0}, allow_fallbacks: false.
-//     If the model's free tier is unavailable, the request fails - it can never spend money.
-//   - Tester mode additionally requires the shared TESTER_TOKEN secret
-//     (Authorization: Bearer <token> or X-Tester-Token header).
-//   - A global daily and per-minute quota is enforced with ONE atomic conditional UPDATE
-//     (singleton row, RETURNING) - no read-then-write race.
-//   - The upstream request has a lifetime timeout covering the whole response stream,
-//     not just response headers.
-//   - Clients only ever receive generic error bodies; upstream error text is never relayed.
+// Server-only reviewed model routes, D1 enable/order, zero-price+ZDR enforced.
+// One current nonsensitive user message; authenticated installs; no content logs.
+// Atomic global inference-attempt quotas and one-time pairing redemption.
 
-const MODEL = 'nvidia/nemotron-3-ultra-550b-a55b:free';
 const UPSTREAM_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 const MAX_BODY_BYTES = 16 * 1024;      // hard cap on raw request body, enforced pre-parse
@@ -126,14 +112,16 @@ async function checkQuota(db, now) {
   }
 }
 
-async function handleRequest(request, env, ctx, now = new Date()) {
+async function handleRequest(request, env, ctx, now = new Date(), catalog = CATALOG) {
   if (request.method !== 'POST') return errorResponse(405, 'method not allowed');
 
   // Tester gate: shared secret, singular TESTER_TOKEN (matches the deployed secret name).
   if (!env.TESTER_TOKEN) return errorResponse(503, 'ai connection is not configured');
   const bearer = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
   const headerToken = request.headers.get('X-Tester-Token') || '';
-  if (bearer !== env.TESTER_TOKEN && headerToken !== env.TESTER_TOKEN) {
+  let auth=false;
+  try { auth=await authenticated(bearer || headerToken,env); } catch { return errorResponse(503,'ai connection is not configured'); }
+  if (!auth) {
     return errorResponse(401, 'unauthorized');
   }
 
@@ -150,42 +138,50 @@ async function handleRequest(request, env, ctx, now = new Date()) {
     }
     const userText = extractUserText(body);
 
-    await checkQuota(env.QUOTA_DB, now);
-
-    const timeoutMs = Number(env.UPSTREAM_TIMEOUT_MS) > 0
-      ? Number(env.UPSTREAM_TIMEOUT_MS)
-      : UPSTREAM_TIMEOUT_MS_DEFAULT;
+    const timeoutMs = Number(env.UPSTREAM_TIMEOUT_MS) > 0 ? Number(env.UPSTREAM_TIMEOUT_MS) : UPSTREAM_TIMEOUT_MS_DEFAULT;
     const controller = new AbortController();
-    // Lifetime timeout: stays armed through the entire response stream.
     const timer = setTimeout(() => controller.abort(), timeoutMs);
-
     let upstream;
+    let lastCategory = 'no_eligible_route';
     try {
-      upstream = await fetch(UPSTREAM_URL, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: MODEL,
-          stream: true,
-          max_tokens: MAX_OUTPUT_TOKENS,
-          provider: FREE_ONLY_PROVIDER,
-          messages: [{ role: 'user', content: userText }],
-        }),
-        signal: controller.signal,
-      });
+      const config = await env.QUOTA_DB.prepare('SELECT model, provider FROM model_routes WHERE enabled = 1 ORDER BY priority, model LIMIT 16').all();
+      const routes = [...new Map((config.results || []).map(r => [r.model, r])).values()];
+      let attempts = 0;
+      for (const route of routes) {
+        const policy = catalog[route.model];
+        if (!policy || route.provider !== policy.provider) continue;
+        let eligible = false;
+        try {
+          const meta = await fetch('https://openrouter.ai/api/v1/models/' + route.model + '/endpoints', {signal: controller.signal});
+          if (meta.ok) eligible = eligibleEndpoint(await meta.json(), route);
+          else if (meta.body) await meta.body.cancel();
+        } catch (e) { if (controller.signal.aborted) throw e; }
+        if (!eligible) continue;
+        if (attempts >= 2) break;
+        await checkQuota(env.QUOTA_DB, now);
+        attempts++;
+        try {
+          upstream = await fetch(UPSTREAM_URL, {
+            method: 'POST', headers: { Authorization: `Bearer ${env.OPENROUTER_API_KEY}`, 'Content-Type':'application/json' },
+            body: JSON.stringify({model: route.model, stream:true, max_tokens:MAX_OUTPUT_TOKENS,
+              reasoning:{enabled:false},
+              provider:{...FREE_ONLY_PROVIDER, only:[policy.provider], data_collection:'deny', zdr:true},
+              messages:[{role:'user',content:userText}]}), signal:controller.signal,
+          });
+        } catch (e) { if (controller.signal.aborted) throw e; lastCategory='upstream_unavailable'; continue; }
+        if (upstream.ok && upstream.body && (upstream.headers.get('content-type') || '').includes('text/event-stream')) break;
+        const status = upstream.status;
+        lastCategory = status === 401 ? 'upstream_auth' : status === 402 ? 'upstream_billing' : status === 429 ? 'upstream_rate_limit' : 'upstream_unavailable';
+        if (upstream.body) await upstream.body.cancel().catch(()=>{});
+        upstream = null;
+        if (status === 401 || status === 402 || ![404,408,429].includes(status) && status < 500) break;
+      }
+      if (!upstream) { clearTimeout(timer); return errorResponse(502,lastCategory); }
     } catch (err) {
       clearTimeout(timer);
-      if (err && err.name === 'AbortError') return errorResponse(504, 'request timed out');
-      return errorResponse(502, 'upstream unavailable');
-    }
-
-    if (!upstream.ok || !upstream.body) {
-      clearTimeout(timer);
-      if (upstream.body) upstream.body.cancel().catch(() => {});
-      return errorResponse(502, 'upstream unavailable'); // never relay upstream error text
+      if (controller.signal.aborted) return errorResponse(504,'request timed out');
+      if (err instanceof HttpError) return errorResponse(err.status,err.message);
+      return errorResponse(502,'upstream_unavailable');
     }
 
     const { readable, writable } = new TransformStream();
@@ -208,6 +204,7 @@ async function handleRequest(request, env, ctx, now = new Date()) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    if (url.pathname === '/v1/pair/redeem') return redeem(request,env);
     if (url.pathname === '/health' && request.method === 'GET') {
       return new Response(JSON.stringify({ status: 'ok' }), {
         status: 200,
@@ -220,3 +217,53 @@ export default {
 };
 
 export { handleRequest };
+
+// Reviewed privacy-qualified catalog. Cloud D1 controls enable/order, never APK.
+// New pairs require a server review; arbitrary D1 rows do not widen disclosure.
+const CATALOG = Object.freeze({
+  'xingchen-agi/xing4.0-29b-a4b:free': {provider:'phala'},
+});
+function eligibleEndpoint(meta, route) {
+  if (!route.model.endsWith(':free') || meta?.data?.id !== route.model) return false;
+  return (meta.data.endpoints || []).some(e => e.tag === route.provider && e.model_id === route.model &&
+    e.pricing && ['prompt','completion'].every(k => typeof e.pricing[k] !== 'undefined' && Number(e.pricing[k]) === 0) &&
+    Object.entries(e.pricing).every(([k,v]) => k === 'discount' || Number(v) === 0));
+}
+async function hash(value) {
+  const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value));
+  return [...new Uint8Array(bytes)].map(x=>x.toString(16).padStart(2,'0')).join('');
+}
+function randomCredential() { return [...crypto.getRandomValues(new Uint8Array(32))].map(x=>x.toString(16).padStart(2,'0')).join(''); }
+async function authenticated(token,env) {
+  if (!token) return false;
+  if (token === env.TESTER_TOKEN) return true;
+  if (!/^[a-f0-9]{64}$/.test(token)) return false;
+  const row=await env.QUOTA_DB.prepare('SELECT token_hash FROM install_credentials WHERE token_hash = ? AND revoked = 0').bind(await hash(token)).first();
+  return !!row;
+}
+async function redeem(request,env) {
+  if (request.method !== 'POST') return errorResponse(405,'method not allowed');
+  try {
+    const ip=request.headers.get('CF-Connecting-IP') || 'unknown';
+    const minute=Math.floor(Date.now()/60000);
+    // Limit per-minute global100 and per-IP10. Atomic counters, no raw IP retained.
+    for (const [key,cap] of [['global',100],['ip:'+(await hash(ip)).slice(0,2),10]]) {
+      const r=await env.QUOTA_DB.prepare(`INSERT INTO pairing_limits (key, window, count) VALUES (?, ?, 1)
+        ON CONFLICT(key) DO UPDATE SET window=excluded.window, count=CASE WHEN pairing_limits.window=excluded.window THEN pairing_limits.count+1 ELSE 1 END
+        WHERE pairing_limits.window != excluded.window OR pairing_limits.count < ? RETURNING count`).bind(key,minute,cap).first();
+      if (!r) return errorResponse(429,'pairing rate limit');
+    }
+    const body=JSON.parse(await readBoundedBody(request,1024));
+    if (!body || typeof body.code !== 'string' || !/^[a-f0-9]{64}$/.test(body.code)) return errorResponse(400,'invalid pairing request');
+    const credential=randomCredential();
+    // Atomic transaction: conditional credential insertion and code consumption.
+    const codeHash=await hash(body.code), tokenHash=await hash(credential), now=Date.now();
+    const results=await env.QUOTA_DB.batch([
+      env.QUOTA_DB.prepare('INSERT INTO install_credentials(token_hash,created_at,revoked) SELECT ?,?,0 WHERE EXISTS (SELECT 1 FROM pairing_codes WHERE code_hash=? AND expires_at>?) RETURNING token_hash').bind(tokenHash,now,codeHash,now),
+      env.QUOTA_DB.prepare('DELETE FROM pairing_codes WHERE code_hash=? AND expires_at>? RETURNING code_hash').bind(codeHash,now),
+    ]);
+    if (!results[0]?.results?.length || !results[1]?.results?.length) return errorResponse(401,'pairing code invalid or expired');
+    return new Response(JSON.stringify({credential,endpoint:new URL('/v1/chat/completions',request.url).href}),{headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
+  } catch(e) { return errorResponse(e instanceof HttpError ? e.status : 503,'pairing unavailable'); }
+}
+export {eligibleEndpoint,authenticated,redeem};
