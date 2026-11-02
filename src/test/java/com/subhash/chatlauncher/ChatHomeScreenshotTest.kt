@@ -476,6 +476,45 @@ class ChatHomeScreenshotTest {
         prefs.edit().remove("active_profile").remove("profile_allow_Reasoning").commit()
     }
 
+
+    /** Reasoning gates typed launches too: naming an app shows the pause, typed 'just open it' ends it, and a session bypass prevents repeated interrogation. */
+    @Test
+    fun reasoningTypedCommandGate() {
+        val prefs = composeRule.activity.getSharedPreferences("chat_launcher", android.content.Context.MODE_PRIVATE)
+        prefs.edit()
+            .putString("active_profile", "Reasoning")
+            .putStringSet("profile_allow_Reasoning", setOf("com.instagram.android"))
+            .commit()
+        installFakeApp("com.instagram.android", "Instagram")
+        composeRule.activityRule.scenario.recreate()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("insta")
+        composeRule.onNodeWithText("Send").performClick()
+        composeRule.waitForIdle()
+        // No launch yet - the pause dialog appears instead.
+        composeRule.onNodeWithText("Just open it").assertExists()
+        org.junit.Assert.assertNull(
+            "typed command must not launch before the pause",
+            Shadows.shadowOf(composeRule.activity).nextStartedActivity
+        )
+        // Typed override honors immediately.
+        composeRule.onNodeWithText("write what you want to do").performTextInput("just open it")
+        composeRule.onNodeWithText("Send").performClick()
+        composeRule.waitForIdle()
+        val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
+        org.junit.Assert.assertNotNull("typed 'just open it' dispatches the launch", started)
+        org.junit.Assert.assertEquals("com.instagram.android", started.component?.packageName)
+        // Session bypass: a second typed open launches directly, no repeated interrogation.
+        composeRule.onNodeWithText("write what you want to do").performTextInput("insta")
+        composeRule.onNodeWithText("Send").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Just open it").assertDoesNotExist()
+        org.junit.Assert.assertNotNull(
+            "second open bypasses the pause",
+            Shadows.shadowOf(composeRule.activity).nextStartedActivity
+        )
+        prefs.edit().remove("active_profile").remove("profile_allow_Reasoning").commit()
+    }
     /** Reasoning onboarding: grid-background popup dialog with the first question. */
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
