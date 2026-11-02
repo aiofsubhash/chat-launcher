@@ -52,6 +52,9 @@ import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import org.junit.Before
 import org.junit.Rule
+import org.junit.rules.RuleChain
+import org.junit.rules.TestRule
+import org.junit.runners.model.Statement
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
@@ -64,8 +67,26 @@ import org.robolectric.Shadows
 @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
 class ChatHomeScreenshotTest {
 
+    private val activityRule = createAndroidComposeRule<MainActivity>()
+
+    // Install the fake apps BEFORE the activity launches: the default JUnit order
+    // (rule -> activity start -> @Before) made the first composition query an empty
+    // package manager (00:22 DIAG2), leaving the dock blank until a keystroke forced a
+    // re-query - a fixture artifact, not app behavior. This order mirrors a real cold
+    // start, where installed apps exist before the launcher process starts.
+    private val installFirst = TestRule { base, _ ->
+        object : Statement() {
+            override fun evaluate() {
+                installFakeApps()
+                base.evaluate()
+            }
+        }
+    }
+
     @get:Rule
-    val composeRule = createAndroidComposeRule<MainActivity>()
+    val chain: TestRule = RuleChain.outerRule(installFirst).around(activityRule)
+
+    private val composeRule get() = activityRule
 
     private fun installFakeApp(pkg: String, label: String, canSend: Boolean = false) {
         val pm = ApplicationProvider.getApplicationContext<android.content.Context>().packageManager
@@ -84,8 +105,7 @@ class ChatHomeScreenshotTest {
         if (canSend) spm.addResolveInfoForIntent(Intent(Intent.ACTION_SEND).setType("text/plain"), ri)
     }
 
-    @Before
-    fun installApps() {
+    private fun installFakeApps() {
         installFakeApp("com.whatsapp", "WhatsApp", canSend = true)
         installFakeApp("com.whatsapp.w4b", "WhatsApp Business", canSend = true)
         installFakeApp("com.android.chrome", "Chrome")
@@ -116,7 +136,7 @@ class ChatHomeScreenshotTest {
     @Test
     fun initialHome() {
         composeRule.waitForIdle()
-        // Fake apps install in @Before; poke the composer once so the dock recomputes with them.
+        // Composer poke keeps the dock settled before assertions/renders.
         composeRule.onNodeWithText("write what you want to do").performTextInput("a")
         composeRule.onNodeWithText("a").performTextClearance()
         composeRule.waitForIdle()
@@ -129,6 +149,9 @@ class ChatHomeScreenshotTest {
     @Test
     fun appDuplicateChoice() {
         installFakeApp("com.whatsapp.work", "WhatsApp", canSend = true) // same label as personal WhatsApp
+        // Fakes pre-install before launch now, so the app list is already cached; relaunch
+        // so this extra app is visible (a real device sees a newly installed app on next start).
+        composeRule.activityRule.scenario.recreate()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("write what you want to do").performTextInput("whatsapp")
         composeRule.onNodeWithText("Send").performClick()
@@ -729,7 +752,7 @@ class ChatHomeScreenshotTest {
         val p = ApplicationProvider.getApplicationContext<android.content.Context>().getSharedPreferences("chat_launcher", 0)
         p.edit().putString("dock_apps", "com.ghost.app").commit()
         composeRule.waitForIdle()
-        // Fake apps install in @Before; poke the composer once so the dock recomputes with them.
+        // Composer poke keeps the dock settled before assertions/renders.
         composeRule.onNodeWithText("write what you want to do").performTextInput("a")
         composeRule.onNodeWithText("a").performTextClearance()
         composeRule.waitForIdle()
@@ -882,6 +905,29 @@ class ChatHomeScreenshotTest {
         typeLongQuery()
         composeRule.onRoot().captureRoboImage()
         prefs.edit().remove("theme_mode").commit()
+    }
+
+    /** Regression (00:17): the dock must render on first composition, before any typing -
+     *  the package-manager race must not leave it empty. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun dockVisibleWithoutTyping() {
+        // Clean Normal-mode state; fake apps are installed before the activity launches
+        // (RuleChain), so this asserts a true cold-start dock with no typing.
+        ApplicationProvider.getApplicationContext<android.content.Context>().getSharedPreferences("chat_launcher", 0)
+            .edit().remove("active_profile").remove("dock_apps").commit()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Maps").assertIsDisplayed()
+    }
+
+    /** Same dock-on-arrival guarantee at small available height (IME-open proxy). */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h420dp-xxhdpi")
+    fun dockVisibleWithoutTypingSmallHeight() {
+        ApplicationProvider.getApplicationContext<android.content.Context>().getSharedPreferences("chat_launcher", 0)
+            .edit().remove("active_profile").remove("dock_apps").commit()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Maps").assertIsDisplayed()
     }
 
     /** Injected small available height (proxy for an open IME shrinking the viewport; a real
