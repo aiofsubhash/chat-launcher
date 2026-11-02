@@ -8,6 +8,8 @@ Pairing: POST /v1/pair/redeem {code:64hex} returns {credential,endpoint}; code e
 
 Apply schema.sql (idempotent; v4 additions are additive), preserves quota singleton. Issuance must generate secret code privately, write only SHA256hash+expiry to pairing_codes via supported operator flow, deliver code as one-tap app pairing URL privately; never commit raw code or credential. Code revocation DELETE by hash; install revocation set revoked1 by hash. No code issuance public endpoint.
 
-21 Node tests including real SQLite race + pairing single-use. Run node --test worker.test.js (Node22).
+23 Node tests including real SQLite race + pairing single-use. Run node --test worker.test.js (Node22).
 
 Pairing landing: GET /pair#code=<64hex> carries the code in a browser-only fragment, strips browser history immediately, and requires an explicit Open launcher tap. No external resources/network calls or automatic redemption. CSP script hash/default-src none, no-store, no-referrer, frame denial. Never put a code in a query string. Mint the15minute code only once the APK is ready.
+
+v0.4 compatibility: accept exactly the shipped static system scaffold + one user message; discard the scaffold before inference. Unknown/changed system scaffolds and all extra history remain rejected. New clients should serialize one user message directly. Verified synthetic exact0.4 wire request returns200 SSE stop/DONE, cost0.
