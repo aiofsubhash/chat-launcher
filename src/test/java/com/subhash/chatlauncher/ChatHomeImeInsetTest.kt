@@ -11,6 +11,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -177,6 +178,24 @@ class ChatHomeImeInsetTest {
         assertSendAboveIme()
         composeRule.onRoot().captureRoboImage()
         prefs.edit().remove("theme_mode").commit()
+    }
+
+    /** Worst case (main 01:50): an already-resized small window that STILL reports a
+     *  large IME inset (the double-count some devices produce). Usable height drops below
+     *  what fits pinned, so the home must scroll - every control stays reachable. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h420dp-xxhdpi")
+    fun imeDoubleCountCriticalHeightScrolls() {
+        typeLongQuery()
+        injectIme(true)
+        diag("critical")
+        // Send is beyond the shrunken viewport but must exist and scroll into view.
+        val send = composeRule.onNodeWithText("Send")
+        send.assertExists()
+        send.performScrollTo()
+        send.assertIsDisplayed()
+        composeRule.onNodeWithText("Maps").assertExists()
+        composeRule.onRoot().captureRoboImage()
     }
 
     /** Normal height + injected IME: the 8x-gap home intent survives the inset; Send and
