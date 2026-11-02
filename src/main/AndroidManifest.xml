@@ -32,6 +32,13 @@
                 <category android:name="android.intent.category.HOME" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
+            <!-- One-tap Connect AI pairing: chatlauncher://pair?code=<single-use-code> -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="chatlauncher" android:host="pair" />
+            </intent-filter>
         </activity>
     </application>
 </manifest>
