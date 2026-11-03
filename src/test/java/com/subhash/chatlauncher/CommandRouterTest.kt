@@ -199,37 +199,36 @@ class CommandRouterTest {
     }
 
     // Owner 23:01: ChatGPT chip opened BOTH the app and the browser. One start only.
+    // Robolectric never throws for unresolvable intents, so a wrapper models real Android:
+    // a package-pinned intent for an app that is not installed throws ActivityNotFoundException.
+    private class FakeCtx(base: Context, val installed: Set<String>) : android.content.ContextWrapper(base) {
+        val started = mutableListOf<Intent>()
+        override fun startActivity(intent: Intent) {
+            val pkg = intent.`package`
+            if (pkg != null && pkg !in installed) throw android.content.ActivityNotFoundException()
+            started.add(intent)
+        }
+    }
+
     @Test
     fun aiShortcutStartsExactlyOneActivityAppWhenInstalled() {
         val activity = Robolectric.buildActivity(MainActivity::class.java).get()
-        val pm = org.robolectric.Shadows.shadowOf(activity.packageManager)
-        val ci = android.content.pm.ActivityInfo().apply { packageName = "com.openai.chatgpt"; name = "Main" }
-        pm.addOrUpdateActivity(ci)
-        val sa = org.robolectric.Shadows.shadowOf(activity)
+        val ctx = FakeCtx(activity, setOf("com.openai.chatgpt"))
         val target = queryShortcutTargets.first { it.label == "ChatGPT" }
-        assertTrue(dispatchQueryShortcut(activity, target, "hello there this is long"))
-        val first = sa.nextStartedActivity
-        assertEquals("com.openai.chatgpt", first.`package`)
-        assertNull("browser must not also start", sa.nextStartedActivity)
+        assertTrue(dispatchQueryShortcut(ctx, target, "hello there this is long"))
+        assertEquals(1, ctx.started.size)
+        assertEquals("com.openai.chatgpt", ctx.started[0].`package`)
     }
 
     @Test
     fun aiShortcutFallsBackToBrowserOnlyWhenAppMissing() {
         val activity = Robolectric.buildActivity(MainActivity::class.java).get()
-        val sa = org.robolectric.Shadows.shadowOf(activity)
+        val ctx = FakeCtx(activity, emptySet())
         val target = queryShortcutTargets.first { it.label == "Claude" }
-        // Pinned-app intent has no handler -> ActivityNotFound -> browser route, once.
-        val handler = org.robolectric.Shadows.shadowOf(activity.packageManager)
-        handler.addActivityIfNotPresent(android.content.ComponentName("browser.pkg", "B"))
-        handler.addIntentFilterForActivity(
-            android.content.ComponentName("browser.pkg", "B"),
-            android.content.IntentFilter(Intent.ACTION_VIEW).apply { addCategory(Intent.CATEGORY_DEFAULT); addDataScheme("https") }
-        )
-        assertTrue(dispatchQueryShortcut(activity, target, "hello there this is long"))
-        val started = sa.nextStartedActivity
-        assertNull(started.`package`)
-        assertEquals("https://claude.ai/new", started.data.toString())
-        assertNull(sa.nextStartedActivity)
+        assertTrue(dispatchQueryShortcut(ctx, target, "hello there this is long"))
+        assertEquals(1, ctx.started.size)
+        assertNull("pkg=" + ctx.started[0].`package` + " cmp=" + ctx.started[0].component + " all=" + ctx.started, ctx.started[0].`package`)
+        assertEquals("https://claude.ai/new", ctx.started[0].data.toString())
     }
 
     @Test
@@ -243,5 +242,12 @@ class CommandRouterTest {
     @Test
     fun shortcutsOrderIsChatGptClaudeGoogle() {
         assertEquals(listOf("ChatGPT", "Claude", "Google"), queryShortcutTargets.map { it.label })
+    }
+
+    @Test
+    fun chatWithAiSentinelIsDistinctFromRealApps() {
+        assertEquals("special:chat_with_ai", CHAT_WITH_AI_KEY)
+        val e = AppEntry("Chat with AI", CHAT_WITH_AI_KEY, Intent())
+        assertEquals("Chat with AI", e.displayLabel)
     }
 }
