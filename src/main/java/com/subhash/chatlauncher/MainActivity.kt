@@ -727,7 +727,14 @@ fun ChatHome(
                     } else {
                         keyboardController?.hide()
                         focusManager.clearFocus()
-                        if (!launchApp(app)) {
+                        // Work pins display from the unfiltered installed list (12:44), but the
+                        // profile access policy still governs what opens (12:47): a pin outside
+                        // the active profile's allow-list says so instead of launching. Same
+                        // gate as the camera swipe; a no-op where the dock is pre-filtered.
+                        val profile = activeProfile
+                        if (profile != null && app.identityKey !in router.effectiveAllowed(profile, workKeys)) {
+                            addAssistant("${app.displayLabel} isn't in your $profile profile, so I won't open it here.")
+                        } else if (!launchApp(app)) {
                             addAssistant(if (app.packageName == CommandRouter.TIMER_KEY) "No clock app on this phone handles timers." else CommandRouter.launchFailureMessage(app))
                         }
                     }
