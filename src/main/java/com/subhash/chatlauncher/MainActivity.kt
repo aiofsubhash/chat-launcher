@@ -985,6 +985,31 @@ fun ChatHome(
                 // ChatGPT / Claude / Google through their documented URL contracts. Prefill
                 // only - the target app opens with the text filled in; the user sends it there.
                 Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    // Owner 21:52: brand-logo query shortcuts for longer queries ("more than
+                    // four, five words" -> five-word threshold), plain transparent taps                     // next to Send, no bubbles (main 23:49). ChatGPT / Claude currently copy
+                    // the query and open a blank chat (fallback pending user consent via main);
+                    // Google searches directly.
+                    if (input.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.size >= 5) {
+                        queryShortcutTargets.forEach { target ->
+                            androidx.compose.material3.Icon(
+                                painter = androidx.compose.ui.res.painterResource(target.iconRes),
+                                contentDescription = target.label,
+                                tint = androidx.compose.ui.graphics.Color.Unspecified,
+                                modifier = Modifier
+                                    .padding(start = 0.dp, end = 4.dp)
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .clickable {
+                                        keyboardController?.hide()
+                                        if (target.opensBlank) {
+                                            clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(input.trim()))
+                                        }
+                                        dispatchQueryShortcut(context, target, input.trim())
+                                    }
+                                    .padding(8.dp),
+                            )
+                        }
+                    }
                     // Suggestions sit inline left of Send, not above the composer.
                     if (suggestions.isNotEmpty()) {
                         LazyRow(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
@@ -1012,34 +1037,6 @@ fun ChatHome(
                         }
                     } else {
                         Spacer(Modifier.weight(1f))
-                    }
-                    // Owner 21:52: brand-logo query shortcuts for longer queries ("more than
-                    // four, five words" -> five-word threshold), plain transparent taps right
-                    // next to Send, no bubbles (main 23:49). ChatGPT / Claude currently copy
-                    // the query and open a blank chat (fallback pending user consent via main);
-                    // Google searches directly.
-                    if (input.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.size >= 5) {
-                        queryShortcutTargets.forEach { target ->
-                            androidx.compose.material3.Icon(
-                                painter = androidx.compose.ui.res.painterResource(target.iconRes),
-                                contentDescription = target.label,
-                                tint = androidx.compose.ui.graphics.Color.Unspecified,
-                                modifier = Modifier
-                                    .padding(end = 6.dp)
-                                    .size(40.dp)
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .clickable {
-                                        keyboardController?.hide()
-                                        if (target.opensBlank) {
-                                            clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(input.trim()))
-                                            context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(target.urlPrefix)))
-                                        } else {
-                                            context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(target.urlPrefix + android.net.Uri.encode(input.trim()))))
-                                        }
-                                    }
-                                    .padding(8.dp),
-                            )
-                        }
                     }
                     Surface(
                         shape = RoundedCornerShape(6.dp),
@@ -2090,7 +2087,33 @@ fun ReasoningInterventionDialog(
 
 
 /** Full app grid overlay (swipe left, Normal mode). */
-data class QueryShortcutTarget(val label: String, val urlPrefix: String, val iconRes: Int, val opensBlank: Boolean = false)
+data class QueryShortcutTarget(val label: String, val urlPrefix: String, val iconRes: Int, val opensBlank: Boolean = false, val appPackage: String? = null)
+
+/**
+ * Exclusive dispatch (owner 23:01: ChatGPT opened BOTH the app and the browser). The brand's
+ * own app is tried first with the package pinned; the browser is used ONLY if that app is not
+ * installed. Exactly one activity is started. No text is auto-sent: AI chips copy the query
+ * first and open a blank chat, Google opens its search page.
+ */
+fun queryShortcutIntents(target: QueryShortcutTarget, text: String): List<Intent> {
+    val uri = android.net.Uri.parse(if (target.opensBlank) target.urlPrefix else target.urlPrefix + android.net.Uri.encode(text))
+    val browser = Intent(Intent.ACTION_VIEW, uri)
+    val app = target.appPackage?.let { Intent(Intent.ACTION_VIEW, uri).setPackage(it) }
+    return listOfNotNull(app, browser)
+}
+
+/** Starts the first intent that resolves and stops there. Returns true when something opened. */
+fun dispatchQueryShortcut(context: android.content.Context, target: QueryShortcutTarget, text: String): Boolean {
+    for (intent in queryShortcutIntents(target, text)) {
+        try {
+            context.startActivity(intent)
+            return true
+        } catch (e: android.content.ActivityNotFoundException) {
+            // try the next route
+        }
+    }
+    return false
+}
 
 val queryShortcutTargets = listOf(
     // chatgpt.com/?q= AUTO-SENDS for logged-out web sessions (observed live 23:48) - rejected
@@ -2099,8 +2122,8 @@ val queryShortcutTargets = listOf(
     // contract verifies on the user's device, both AI chips use the consent-pending fallback:
     // copy the query to the clipboard and open a blank new chat; the user pastes and submits.
     // Google runs the search directly - the owner explicitly asked for that (21:52).
-    QueryShortcutTarget("ChatGPT", "https://chatgpt.com/", R.drawable.ic_brand_chatgpt, opensBlank = true),
-    QueryShortcutTarget("Claude", "https://claude.ai/new", R.drawable.ic_brand_claude, opensBlank = true),
+    QueryShortcutTarget("ChatGPT", "https://chatgpt.com/", R.drawable.ic_brand_chatgpt, opensBlank = true, appPackage = "com.openai.chatgpt"),
+    QueryShortcutTarget("Claude", "https://claude.ai/new", R.drawable.ic_brand_claude, opensBlank = true, appPackage = "com.anthropic.claude"),
     QueryShortcutTarget("Google", "https://www.google.com/search?q=", R.drawable.ic_brand_google),
 )
 
