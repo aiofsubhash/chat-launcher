@@ -462,7 +462,8 @@ fun ChatHome(
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
 
     // Dock: no profile = the user's chosen apps; a profile shows exactly its allow-list
-    // (Timer first in Focus; work entries first in Work).
+    // (Timer first in Focus) - except Work, whose stickies are fixed to Slack, Claude,
+    // Gmail (owner 12:44), independent of the Work allow-list that governs launching.
     // First composition can race LauncherApps visibility (Robolectric flushes installs
     // async; a real launcher cold start can hit the same window). Retry briefly after
     // composition so the dock always settles (00:17 diagnostic: zero dock notes until the
@@ -484,6 +485,10 @@ fun ChatHome(
         if (profile == null) {
             val keys = router.normalDockKeys(allInstalled.map { it.identityKey }.toSet())
             keys.mapNotNull { key -> if (key == CommandRouter.TIMER_KEY) timerApp else allInstalled.firstOrNull { it.identityKey == key } }
+        } else if (profile == CommandRouter.WORK) {
+            // Owner 12:44: Work-mode stickies are exactly Slack, Claude, Gmail. Display
+            // only - the Work access policy (allowedNow) still governs what opens.
+            CommandRouter.workDockApps(allInstalled)
         } else {
             val allowed = router.effectiveAllowed(profile, workKeys)
             val apps = allInstalled.filter { it.identityKey in allowed }
