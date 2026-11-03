@@ -249,6 +249,7 @@ class MainActivity : ComponentActivity() {
                     resolveApps = { query -> resolveApps(query) },
                     shareTargets = { text -> shareTargets(text) },
                     allApps = { resolveApps("", limit = Int.MAX_VALUE) },
+                    workDockSource = { installedApps() },
                     history = historyStore,
                     aiAvailable = { router.apiKey.isNotBlank() },
                     timerApp = router.timerIntent()?.let { AppEntry("Timer", CommandRouter.TIMER_KEY, it) },
@@ -430,6 +431,9 @@ fun ChatHome(
     resolveApps: (String) -> List<AppEntry>,
     shareTargets: (String) -> List<AppEntry>,
     allApps: () -> List<AppEntry>,
+    // Work-mode pins resolve from the UNFILTERED installed list: the 12:44 dock contract is
+    // display-only, independent of the Work allow-list that governs launching (12:47).
+    workDockSource: () -> List<AppEntry> = { CommandRouter.workDockApps(allApps()) },
     sendToLlm: suspend (List<Pair<String, String>>, suspend (String) -> Unit) -> String?,
     launchApp: (AppEntry) -> Boolean,
     history: HistoryStore? = null,
@@ -487,8 +491,10 @@ fun ChatHome(
             keys.mapNotNull { key -> if (key == CommandRouter.TIMER_KEY) timerApp else allInstalled.firstOrNull { it.identityKey == key } }
         } else if (profile == CommandRouter.WORK) {
             // Owner 12:44: Work-mode stickies are exactly Slack, Claude, Gmail. Display
-            // only - the Work access policy (allowedNow) still governs what opens.
-            CommandRouter.workDockApps(allInstalled)
+            // only - the Work access policy (allowedNow) still governs what opens. Source
+            // is the unfiltered installed list: allInstalled is allow-list-filtered, which
+            // emptied the dock on restart when the pins were not Work additions.
+            CommandRouter.workDockApps(workDockSource())
         } else {
             val allowed = router.effectiveAllowed(profile, workKeys)
             val apps = allInstalled.filter { it.identityKey in allowed }
