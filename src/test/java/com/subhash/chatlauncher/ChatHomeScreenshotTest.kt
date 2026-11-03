@@ -583,6 +583,35 @@ class ChatHomeScreenshotTest {
         composeRule.activityRule.scenario.recreate()
     }
 
+    /** Work pins display unfiltered (12:44) but the Work access policy still governs what
+     *  opens (12:47): tapping a displayed pin that is NOT in the Work allow-list must not
+     *  launch it - the policy says so instead. Display-only must not silently widen access. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun workModePinTapRespectsAllowList() {
+        val prefs = composeRule.activity.getSharedPreferences("chat_launcher", android.content.Context.MODE_PRIVATE)
+        prefs.edit()
+            .putString("active_profile", "Work")
+            .putStringSet("profile_allow_Work", setOf("com.instagram.android"))
+            .commit()
+        composeRule.activityRule.scenario.recreate()
+        composeRule.waitForIdle()
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodesWithText("Gmail").fetchSemanticsNodes().isNotEmpty()
+        }
+        // The pin is displayed (display-only contract)...
+        composeRule.onNodeWithText("Gmail").performClick()
+        composeRule.waitForIdle()
+        // ...but tapping it does NOT open Gmail (policy governs launch)...
+        val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
+        org.junit.Assert.assertNull("a Work pin outside the allow-list must not launch", started)
+        // ...and the app says why.
+        composeRule.onNodeWithText("Gmail isn't in your Work profile, so I won't open it here.").assertExists()
+        composeRule.onRoot().captureRoboImage()
+        prefs.edit().remove("active_profile").remove("profile_allow_Work").commit()
+        composeRule.activityRule.scenario.recreate()
+    }
+
     /** Regression for the device report "typed Insta, Enter, said opening but nothing happened":
      *  the IME Enter path must dispatch a launch intent at the real Instagram component.
      *  (Dispatch truth only - whether a device foregrounds the app is not observable here.) */
