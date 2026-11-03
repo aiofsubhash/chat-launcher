@@ -106,6 +106,25 @@ class DockProfileSwitchTest {
         composeRule.waitUntil(5_000) { dockShows("Maps") }
         composeRule.onNodeWithText("Maps").assertIsDisplayed()
     }
+
+    /** Device 23:36: typing an app the active profile forbids must be a local answer, not an AI call. */
+    @Test
+    fun typingForbiddenAppNameInFocusIsLocalPolicyAnswer() {
+        composeRule.waitUntil(5_000) { dockShows("Maps") }
+        say("focus Focus")
+        say("Spotify")
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithText("Spotify isn't allowed in the Focus profile", substring = true).fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
+    /** The guard must not swallow valid launches: an allowed exact app in Normal opens without a policy message. */
+    @Test
+    fun typingAllowedAppNameInNormalIsNotBlocked() {
+        composeRule.waitUntil(5_000) { dockShows("Maps") }
+        say("Spotify")
+        assertTrue(composeRule.onAllNodesWithText("isn't allowed", substring = true).fetchSemanticsNodes().isEmpty())
+    }
 }
 
 /** Same real path, but the activity is (re)created while Focus is the persisted profile. */
@@ -148,16 +167,5 @@ class DockStartInFocusTest {
             composeRule.onAllNodesWithText("Maps").fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithText("Maps").assertIsDisplayed()
-    }
-
-    /** Device 23:36: typing an app the active profile forbids must be a local answer, not an AI call. */
-    @Test
-    fun typingForbiddenAppNameInFocusIsLocalPolicyAnswer() {
-        composeRule.waitUntil(5_000) { dockShows("Maps") }
-        say("focus Focus")
-        say("Spotify")
-        composeRule.waitUntil(5_000) {
-            composeRule.onAllNodesWithText("Spotify isn't allowed in the Focus profile", substring = true).fetchSemanticsNodes().isNotEmpty()
-        }
     }
 }
