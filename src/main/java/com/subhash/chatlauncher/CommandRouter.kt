@@ -198,6 +198,23 @@ class CommandRouter(
         fun prioritizeWork(apps: List<AppEntry>, workMode: Boolean): List<AppEntry> =
             if (workMode) apps.sortedByDescending { it.isWork } else apps
 
+        /**
+         * Owner 12:44: the Work-mode sticky dock is exactly Slack, Claude, Gmail, in the
+         * owner's stated order. The work-profile instance wins when both profiles carry the
+         * app (work context grounds the pick; never an arbitrary package guess); a
+         * personal-only install still shows so the named note exists. Dock display only:
+         * the Work access policy (openable apps, suggestions, share targets) is unchanged.
+         */
+        val WORK_DOCK_PACKAGES: List<String> =
+            listOf("com.Slack", "com.anthropic.claude", "com.google.android.gm")
+
+        /** Resolve the Work dock stickies from installed apps; missing apps drop out. */
+        fun workDockApps(apps: List<AppEntry>): List<AppEntry> =
+            WORK_DOCK_PACKAGES.mapNotNull { pkg ->
+                apps.firstOrNull { it.packageName == pkg && it.isWork }
+                    ?: apps.firstOrNull { it.packageName == pkg }
+            }
+
         /** 30-minute idle reset: fresh chat only when nothing unsent and no question is pending. */
         fun shouldResetChat(idleMillis: Long, hasMessages: Boolean, hasDraft: Boolean, hasPendingQuestion: Boolean): Boolean =
             idleMillis > 30L * 60 * 1000 && hasMessages && !hasDraft && !hasPendingQuestion
