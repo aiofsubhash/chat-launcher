@@ -74,6 +74,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/** Test-pinnable wall clock for the top-bar display; production reads the real time. */
+internal object AppClock {
+    var nowMillis: () -> Long = { System.currentTimeMillis() }
+}
+
 // Calm, paper-like palette: warm off-white background, muted teal accent, soft gray text.
 val calmColors = lightColorScheme(
     primary = Color(0xFF3E8E8A),
@@ -217,6 +222,7 @@ class MainActivity : ComponentActivity() {
         val prefs = getSharedPreferences("chat_launcher", MODE_PRIVATE)
         router = CommandRouter(this, prefs)
         historyStore = HistoryStore(prefs)
+        maybeAutoEnroll(prefs)
         // Hidden-list -> allow-list migration, only with a real app list (else deferred).
         val keys = installedApps().map { it.identityKey }.toSet()
         if (keys.isNotEmpty()) router.migrateHiddenProfiles(keys)
@@ -303,6 +309,31 @@ class MainActivity : ComponentActivity() {
     private fun pairSay(text: String) {
         historyStore.append("assistant", "local", text)
         pairMessage = text
+    }
+
+    /**
+     * Automatic AI enrollment (owner 14:43: no manual pairing step). A private build can carry
+     * a single-use enrollment ticket; first launch redeems it through the same pinned, never
+     * logged path as the manual link. Lifecycle and decisions live in EnrollmentCoordinator /
+     * EnrollmentGate; the manual pairing link in Settings remains an alternative, never a
+     * requirement. No-op in builds without a ticket.
+     */
+    private fun maybeAutoEnroll(prefs: android.content.SharedPreferences) {
+        EnrollmentCoordinator(
+            storage = object : EnrollmentCoordinator.AttemptStorage {
+                override var attemptedTicketHash: String?
+                    get() = prefs.getString("enroll_attempt_hash", null)
+                    set(value) { prefs.edit().putString("enroll_attempt_hash", value).apply() }
+            },
+            hasCredential = { router.apiKey.isNotBlank() },
+            saveCredential = { credential, endpoint ->
+                router.apiKey = credential
+                router.chatEndpoint = endpoint
+            },
+            redeem = { code -> LlmClient.redeemPairingCode(code) },
+            announce = { pairSay(it) },
+            scope = pairScope,
+        ).maybeAutoEnroll(BuildConfig.ENROLLMENT_TICKET)
     }
 
     private fun handlePairIntent(intent: Intent?) {
@@ -504,11 +535,11 @@ fun ChatHome(
     }
 
     // Live clock for the top bar, refreshed every 30s.
-    var now by remember { mutableStateOf(SimpleDateFormat("EEE, d MMM - HH:mm", Locale.getDefault()).format(Date())) }
+    var now by remember { mutableStateOf(SimpleDateFormat("EEE, d MMM - HH:mm", Locale.getDefault()).format(Date(AppClock.nowMillis()))) }
     var lastActivityAt by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
-            now = SimpleDateFormat("EEE, d MMM - HH:mm", Locale.getDefault()).format(Date())
+            now = SimpleDateFormat("EEE, d MMM - HH:mm", Locale.getDefault()).format(Date(AppClock.nowMillis()))
             // 30 minutes idle starts a fresh chat - but never silently discards an unsent
             // draft, an unanswered question, or a pending Ask AI / draft-text prompt.
             if (CommandRouter.shouldResetChat(
