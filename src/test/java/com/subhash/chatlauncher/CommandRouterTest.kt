@@ -197,4 +197,51 @@ class CommandRouterTest {
         assertNull(started.data)
         assertTrue(note.contains("shuvo") && note.contains("isn't filled in"))
     }
+
+    // Owner 23:01: ChatGPT chip opened BOTH the app and the browser. One start only.
+    @Test
+    fun aiShortcutStartsExactlyOneActivityAppWhenInstalled() {
+        val activity = Robolectric.buildActivity(MainActivity::class.java).get()
+        val pm = org.robolectric.Shadows.shadowOf(activity.packageManager)
+        val ci = android.content.pm.ActivityInfo().apply { packageName = "com.openai.chatgpt"; name = "Main" }
+        pm.addOrUpdateActivity(ci)
+        val sa = org.robolectric.Shadows.shadowOf(activity)
+        val target = queryShortcutTargets.first { it.label == "ChatGPT" }
+        assertTrue(dispatchQueryShortcut(activity, target, "hello there this is long"))
+        val first = sa.nextStartedActivity
+        assertEquals("com.openai.chatgpt", first.`package`)
+        assertNull("browser must not also start", sa.nextStartedActivity)
+    }
+
+    @Test
+    fun aiShortcutFallsBackToBrowserOnlyWhenAppMissing() {
+        val activity = Robolectric.buildActivity(MainActivity::class.java).get()
+        val sa = org.robolectric.Shadows.shadowOf(activity)
+        val target = queryShortcutTargets.first { it.label == "Claude" }
+        // Pinned-app intent has no handler -> ActivityNotFound -> browser route, once.
+        val handler = org.robolectric.Shadows.shadowOf(activity.packageManager)
+        handler.addActivityIfNotPresent(android.content.ComponentName("browser.pkg", "B"))
+        handler.addIntentFilterForActivity(
+            android.content.ComponentName("browser.pkg", "B"),
+            android.content.IntentFilter(Intent.ACTION_VIEW).apply { addCategory(Intent.CATEGORY_DEFAULT); addDataScheme("https") }
+        )
+        assertTrue(dispatchQueryShortcut(activity, target, "hello there this is long"))
+        val started = sa.nextStartedActivity
+        assertNull(started.`package`)
+        assertEquals("https://claude.ai/new", started.data.toString())
+        assertNull(sa.nextStartedActivity)
+    }
+
+    @Test
+    fun googleShortcutSearchesDirectlyUnchanged() {
+        val target = queryShortcutTargets.first { it.label == "Google" }
+        val intents = queryShortcutIntents(target, "a b c d e")
+        assertEquals(1, intents.size)
+        assertEquals("https://www.google.com/search?q=a%20b%20c%20d%20e", intents[0].data.toString())
+    }
+
+    @Test
+    fun shortcutsOrderIsChatGptClaudeGoogle() {
+        assertEquals(listOf("ChatGPT", "Claude", "Google"), queryShortcutTargets.map { it.label })
+    }
 }
