@@ -333,7 +333,13 @@ class MainActivity : ComponentActivity() {
             redeem = { code -> LlmClient.redeemPairingCode(code) },
             announce = { pairSay(it) },
             scope = pairScope,
-        ).maybeAutoEnroll(BuildConfig.ENROLLMENT_TICKET)
+        ).maybeAutoEnroll(
+            BuildConfig.ENROLLMENT_TICKET.ifBlank {
+                // Packaged-ticket path: a release step may add assets/enrollment.ticket before signing.
+                runCatching { assets.open("enrollment.ticket").bufferedReader().use { it.readText().trim() } }
+                    .getOrDefault("")
+            }
+        )
     }
 
     private fun handlePairIntent(intent: Intent?) {
