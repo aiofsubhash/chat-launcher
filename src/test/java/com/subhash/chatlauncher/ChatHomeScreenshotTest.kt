@@ -547,6 +547,42 @@ class ChatHomeScreenshotTest {
         prefs.edit().remove("active_profile").commit()
     }
 
+    /** User 12:47: Work mode pins Slack/Claude/Gmail but other allowed apps stay searchable
+     *  and launchable. Exercises the real installedApps + allow-list path: a Work addition
+     *  (Instagram) is not pinned yet still answers a query and dispatches its launch. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun workModeOtherAllowedAppsStillSearchable() {
+        val prefs = composeRule.activity.getSharedPreferences("chat_launcher", android.content.Context.MODE_PRIVATE)
+        prefs.edit()
+            .putString("active_profile", "Work")
+            .putStringSet("profile_allow_Work", setOf("com.instagram.android"))
+            .commit()
+        composeRule.activityRule.scenario.recreate()
+        composeRule.waitForIdle()
+        // Clock-advancing settle: the dock's retry LaunchedEffect needs frame-clock time
+        // (00:17 diagnostic); waitUntil advances it instead of a composer poke.
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodesWithText("Gmail").fetchSemanticsNodes().isNotEmpty()
+        }
+        // Dock shows the Gmail pin (Slack/Claude absent in this fixture); Instagram is not pinned.
+        composeRule.onNodeWithText("Gmail").assertExists()
+        composeRule.onNodeWithText("Instagram").assertDoesNotExist()
+        // ...but it still answers a query...
+        composeRule.onNodeWithText("write what you want to do").performTextInput("insta")
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Instagram").assertExists()
+        // ...and Enter dispatches the launch.
+        composeRule.onNodeWithText("insta").performImeAction()
+        composeRule.waitForIdle()
+        val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
+        org.junit.Assert.assertNotNull("Work mode still launches an allowed non-pin app", started)
+        org.junit.Assert.assertEquals("com.instagram.android", started.component?.packageName)
+        composeRule.onRoot().captureRoboImage()
+        prefs.edit().remove("active_profile").remove("profile_allow_Work").commit()
+        composeRule.activityRule.scenario.recreate()
+    }
+
     /** Regression for the device report "typed Insta, Enter, said opening but nothing happened":
      *  the IME Enter path must dispatch a launch intent at the real Instagram component.
      *  (Dispatch truth only - whether a device foregrounds the app is not observable here.) */
