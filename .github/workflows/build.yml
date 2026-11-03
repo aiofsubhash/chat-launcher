@@ -1,6 +1,9 @@
 name: build-unsigned
 on:
   workflow_dispatch:
+  push:
+    branches: [wip-device-feedback]
+    paths-ignore: ['**.md']
 permissions:
   contents: read
 jobs:
