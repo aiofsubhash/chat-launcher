@@ -645,7 +645,7 @@ fun ChatHome(
     fun askAi(prompt: String) {
         lastActivityAt = System.currentTimeMillis()
         if (!aiAvailable()) {
-            addAssistant("Ask AI needs a connection first - tap the pairing link you were sent, or see Settings > Account. Nothing was sent.")
+            addAssistant("AI isn't connected yet - this build sets itself up when you open it online, or see Settings > Account. Nothing was sent.")
             return
         }
         scope.launch {
@@ -726,7 +726,7 @@ fun ChatHome(
                 askAi(raw)
             } else {
                 // Unpaired: explain the connection path - never a silent note or a fake save claim.
-                addAssistant("Ask AI needs a connection first - tap the pairing link you were sent, or see Settings > Account. Nothing was sent.")
+                addAssistant("AI isn't connected yet - this build sets itself up when you open it online, or see Settings > Account. Nothing was sent.")
             }
         } else {
             handleResult(result)
@@ -1694,14 +1694,14 @@ fun SettingsContent(
                     } else {
                         Text("AI isn't connected yet.", fontFamily = roundedFont, fontSize = 15.sp, color = MaterialTheme.colorScheme.onBackground)
                         Text(
-                            "Tap the pairing link you were sent and this connects itself - no API key to enter, nothing to paste.",
+                            "This build sets itself up the first time you open it with internet - no API key to enter, nothing to paste. If that fails you will see a message here; the pairing link still works.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 6.dp),
                         )
                     }
                     Text(
-                        "Open-ended questions can go to a cloud AI - only when you tap \"Ask AI\" on a specific message, and only that message's text is sent. Apps, drafts, notes, history and profiles never leave this phone. What the cloud route retains depends on the server's current approved provider, so avoid sending personal or confidential info.",
+                        "When AI is connected, general chat text that is not an app, a draft or a command goes to a cloud AI, one message at a time, and only that message's text is sent. Apps, drafts, notes, history and profiles never leave this phone. What the cloud route retains depends on the server's current approved provider, so avoid sending personal or confidential info.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 10.dp),
