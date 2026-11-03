@@ -159,6 +159,9 @@ object LlmClient {
     /** Clean error line for the UI - never a raw server JSON dump. */
     internal fun proxyErrorMessage(code: Int, errBody: String): String {
         val detail = try { JSONObject(errBody).getJSONObject("error").optString("message") } catch (e: Exception) { "" }
+        if (code == 429 || detail.contains("rate_limit", true)) {
+            return "The free AI is busy right now. Nothing is lost - try again in a bit."
+        }
         return if (detail.isNotBlank()) "The AI couldn't answer (error $code) - $detail" else "The AI couldn't answer (error $code)."
     }
 
