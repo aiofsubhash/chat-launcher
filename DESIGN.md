@@ -18,6 +18,9 @@ Baseline set by Subhash (voice notes, Nov 1 2026). This document is the referenc
 - Grid style toggle (wobbly hand-drawn vs straight).
 - Home apps checkboxes (pick up to 4 for the dock).
 - Focus profiles section (create/activate profiles).
+- Work-mode sticky dock is fixed to Slack, Claude, Gmail (owner 12:44): the work-profile
+  instance wins a personal/work duplicate, a personal-only install still shows, and no
+  other work app appears. Display only - the Work allow-list still governs what opens.
 
 ## Later (user-listed ideas, NOT implemented yet)
 
