@@ -149,5 +149,15 @@ class DockStartInFocusTest {
         }
         composeRule.onNodeWithText("Maps").assertIsDisplayed()
     }
+
+    /** Device 23:36: typing an app the active profile forbids must be a local answer, not an AI call. */
+    @Test
+    fun typingForbiddenAppNameInFocusIsLocalPolicyAnswer() {
+        composeRule.waitUntil(5_000) { dockShows("Maps") }
+        say("focus Focus")
+        say("Spotify")
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithText("Spotify isn't allowed in the Focus profile", substring = true).fetchSemanticsNodes().isNotEmpty()
+        }
+    }
 }
-// cohesive v0.5.1 run
