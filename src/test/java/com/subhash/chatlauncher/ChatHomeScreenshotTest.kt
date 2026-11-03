@@ -513,27 +513,38 @@ class ChatHomeScreenshotTest {
         prefs.edit().remove("active_profile").commit()
     }
 
-    /** Work profile home with a managed duplicate: the work Gmail shows with its marker. */
+    /** Work profile home, owner 12:44 contract: the sticky dock is exactly Slack, Claude,
+     *  Gmail. The work-profile instance wins a personal/work duplicate; a personal-only
+     *  install still shows its named note; any other work app stays off the dock. */
     @Test
     fun workProfileDock() {
-        val personal = AppEntry("Gmail", "com.google.android.gm", Intent())
-        val work = AppEntry("Gmail", "com.google.android.gm", Intent(), isWork = true, userSerial = 10L)
+        val personalGmail = AppEntry("Gmail", "com.google.android.gm", Intent())
+        val workGmail = AppEntry("Gmail", "com.google.android.gm", Intent(), isWork = true, userSerial = 10L)
+        val personalSlack = AppEntry("Slack", "com.Slack", Intent())
+        val workSlack = AppEntry("Slack", "com.Slack", Intent(), isWork = true, userSerial = 10L)
+        val personalClaude = AppEntry("Claude", "com.anthropic.claude", Intent())
+        val workTeams = AppEntry("Teams", "com.microsoft.teams", Intent(), isWork = true, userSerial = 10L)
+        val installed = listOf(personalGmail, workGmail, personalSlack, workSlack, personalClaude, workTeams)
         val prefs = composeRule.activity.getSharedPreferences("chat_launcher", android.content.Context.MODE_PRIVATE)
         composeRule.activity.setContent {
             MaterialTheme(colorScheme = calmColors) {
                 ChatHome(
                     router = CommandRouter(composeRule.activity, prefs).apply { activeProfile = "Work" },
-                    resolveApps = { listOf(personal, work) },
+                    resolveApps = { installed },
                     shareTargets = { emptyList() },
-                    allApps = { listOf(personal, work) },
+                    allApps = { installed },
                     sendToLlm = { _, _ -> null },
                     launchApp = { true },
                 )
             }
         }
         composeRule.waitForIdle()
+        composeRule.onNodeWithText("💼 Slack").assertExists()
+        composeRule.onNodeWithText("Claude").assertExists()
         composeRule.onNodeWithText("💼 Gmail").assertExists()
+        composeRule.onNodeWithText("💼 Teams").assertDoesNotExist()
         composeRule.onRoot().captureRoboImage()
+        prefs.edit().remove("active_profile").commit()
     }
 
     /** Regression for the device report "typed Insta, Enter, said opening but nothing happened":
