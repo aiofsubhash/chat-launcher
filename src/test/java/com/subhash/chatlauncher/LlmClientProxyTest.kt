@@ -94,4 +94,11 @@ class LlmClientProxyTest {
             server.close()
         }
     }
+
+    @Test
+    fun rateLimitShowsFriendlyLineNotInternalCode() {
+        val msg = LlmClient.proxyErrorMessage(502, """{"error":{"message":"upstream_rate_limit"}}""")
+        assertEquals("The free AI is busy right now. Nothing is lost - try again in a bit.", msg)
+        assertEquals(msg, LlmClient.proxyErrorMessage(429, ""))
+    }
 }
