@@ -956,6 +956,7 @@ fun ChatHome(
                                         // Same label AND same profile side (e.g. cloned apps): fall back to the package name so the choice stays unambiguous.
                                         val sideClash = msg.choiceApps.count { it.choiceLabel == app.choiceLabel } > 1
                                         val chip = when {
+                                            app.packageName == CHAT_WITH_AI_KEY -> app.label
                                             !dup -> app.displayLabel
                                             sideClash -> "${app.choiceLabel} - ${app.packageName}"
                                             else -> app.choiceLabel
