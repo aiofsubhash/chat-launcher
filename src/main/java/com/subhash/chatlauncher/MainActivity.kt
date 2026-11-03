@@ -740,7 +740,14 @@ fun ChatHome(
         if (result is CommandRouter.Result.Reply && result.text.isEmpty()) {
             // General conversation goes straight to the AI when connected (owner 22:52) - only
             // this one message leaves the phone. Unpaired keeps the explicit per-message chip.
-            if (aiAvailable()) {
+            // Typing the exact name of an installed app that the active profile does not allow is a
+            // local policy answer, never an AI question (device 23:36: "Instagram" under Work -> 502).
+            val blockedExact = activeProfile != null && allApps().any { app ->
+                (app.label.equals(raw.trim(), true)) && suggestions.none { it.identityKey == app.identityKey }
+            }
+            if (blockedExact) {
+                addAssistant("${raw.trim()} isn't allowed in the ${activeProfile} profile, so I won't open it. Say 'focus off' to leave the profile.")
+            } else if (aiAvailable()) {
                 askAi(raw)
             } else {
                 // Unpaired: explain the connection path - never a silent note or a fake save claim.
