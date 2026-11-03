@@ -242,6 +242,8 @@ class CommandRouter(
         /** text null = ask what to say first; pkg null = ask which app first. Always a draft. */
         data class DraftMessage(val to: String, val text: String?, val pkg: String? = null) : Result
         data class UberRide(val dropoff: String) : Result
+        /** 'call NAME': only opens the phone dialer (no number, no contact lookup, never places a call). */
+        data class Dial(val name: String) : Result
         /** Duplicate personal/work matches: never silently pick - the user chooses. */
         data class ChooseApp(val apps: List<AppEntry>, val label: String) : Result
     }
@@ -291,6 +293,11 @@ class CommandRouter(
         // Message drafts: deterministic, no AI. Missing text/channel is asked inline.
         MessageIntents.parse(input)?.let { parsed ->
             return Result.DraftMessage(parsed.to, parsed.text, parsed.pkg)
+        }
+        // 'call shuvo': no calling feature or contacts access exists, so hand off to the dialer
+        // app (ACTION_DIAL, no number) and say so - never the 'send a message' fallback.
+        Regex("""(?i)^(?:please\s+|hey\s*,?\s+)*(?:call|phone|ring|dial)\s+(.+)$""").find(input)?.let { m ->
+            return Result.Dial(m.groupValues[1].trim().trim('"'))
         }
         // A command-shaped text that didn't parse stays local - never a silent cloud call.
         if (MessageIntents.looksPrivateAction(input)) {
@@ -373,6 +380,12 @@ class CommandRouter(
                     "Uber isn't available - no ride opened."
                 }
             }
+        }
+        is Result.Dial -> try {
+            activity.startActivity(Intent(Intent.ACTION_DIAL))
+            "Opened your phone dialer. This app can't look up contacts or place calls yet, so '${result.name}' isn't filled in - search for them there."
+        } catch (e: ActivityNotFoundException) {
+            "No dialer app found. Nothing was called."
         }
         is Result.Reply -> result.text
     }
