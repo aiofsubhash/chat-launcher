@@ -178,4 +178,23 @@ class CommandRouterTest {
         org.junit.Assert.assertEquals("\uD83D\uDCBC Gmail", work.displayLabel)
         org.junit.Assert.assertEquals("Gmail", personal.displayLabel)
     }
+
+    // Device bug 22:35: "call shuvo" got the "send a message to <name> on <app>" fallback.
+    @Test
+    fun callRequestIsNeverTheMessageFallback() {
+        val r = router().route("call shuvo", emptyList())
+        assertEquals(CommandRouter.Result.Dial("shuvo"), r)
+        assertEquals(CommandRouter.Result.Dial("Shuvo Das"), router().route("please call Shuvo Das", emptyList()))
+    }
+
+    @Test
+    fun callOnlyOpensDialerAndPlacesNoCall() {
+        val activity = Robolectric.buildActivity(MainActivity::class.java).get()
+        val prefs = activity.getSharedPreferences("test_prefs", Context.MODE_PRIVATE)
+        val note = CommandRouter(activity, prefs).execute(CommandRouter.Result.Dial("shuvo"))
+        val started = org.robolectric.Shadows.shadowOf(activity).nextStartedActivity
+        assertEquals(Intent.ACTION_DIAL, started.action)
+        assertNull(started.data)
+        assertTrue(note.contains("shuvo") && note.contains("isn't filled in"))
+    }
 }
