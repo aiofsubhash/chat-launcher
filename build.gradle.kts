@@ -15,9 +15,17 @@ android {
         targetSdk = 34
         versionCode = 4
         versionName = "0.4.0"
+
+        // Automatic AI enrollment (owner 14:43): the ticket is injected at build time from a
+        // vault-materialized file PATH (-PenrollmentTicketFile=...) - never source, repo, logs,
+        // or a command-line value. Empty in normal/dev builds = manual pairing link only.
+        val enrollmentTicket = providers.gradleProperty("enrollmentTicketFile").orNull
+            ?.let { path -> file(path).takeIf { it.exists() }?.readText()?.trim() }.orEmpty()
+        val ticketEscaped = enrollmentTicket.replace("\\", "\\\\").replace("\"", "\\\"")
+        buildConfigField("String", "ENROLLMENT_TICKET", "\"$ticketEscaped\"")
     }
 
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     testOptions {
         unitTests.isIncludeAndroidResources = true
     }
