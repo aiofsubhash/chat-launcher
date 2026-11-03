@@ -185,6 +185,9 @@ data class ChatMessage(
     val askAi: String? = null,
 )
 
+/** Synthetic last choice in an app-match chooser: send the typed text to the AI instead. */
+const val CHAT_WITH_AI_KEY = "special:chat_with_ai"
+
 data class AppEntry(
     val label: String,
     val packageName: String,
@@ -254,7 +257,8 @@ class MainActivity : ComponentActivity() {
                     onThemeMode = { themeMode = it; router.themeMode = it },
                     resolveApps = { query -> resolveApps(query) },
                     shareTargets = { text -> shareTargets(text) },
-                    allApps = { resolveApps("", limit = Int.MAX_VALUE) },
+                    // Unfiltered by profile: the dock, grid and pickers must not be built from a Focus/Work-trimmed list (23:02 Normal-Focus-Normal bug).
+                    allApps = { installedApps() },
                     workDockSource = { installedApps() },
                     history = historyStore,
                     aiAvailable = { router.apiKey.isNotBlank() },
@@ -615,41 +619,12 @@ fun ChatHome(
         }
     }
 
-    fun handleResult(result: CommandRouter.Result) {
-        when (result) {
-            is CommandRouter.Result.Reply -> {
-                if (result.text.startsWith("Profile '")) {
-                    activeProfile = router.activeProfile
-                    // Typed activation gets the same first-time conversation as the settings path.
-                    if (activeProfile == CommandRouter.REASONING && userContext.isEmpty()) showReasoningOnboarding = true
-                }
-                if (result.text == "Focus mode off.") activeProfile = null
-                addAssistant(result.text)
-            }
-            is CommandRouter.Result.DraftMessage -> handleDraft(result)
-            is CommandRouter.Result.ChooseApp -> addAssistant(
-                "I see more than one '${result.label}' here - which one?",
-                choiceApps = result.apps,
-                onChoice = { app ->
-                    keyboardController?.hide()
-                    focusManager.clearFocus()
-                    if (activeProfile == CommandRouter.REASONING && app.identityKey !in reasoningBypassed) {
-                        reasoningIntervention = app
-                    } else {
-                        addAssistant(router.execute(CommandRouter.Result.Launch(app)))
-                    }
-                },
-            )
-            else -> {
-                val note = router.execute(result)
-                if (note.isNotEmpty()) addAssistant(note)
-            }
-        }
-    }
-
     /** Explicit, per-message cloud AI: ONLY this prompt leaves the phone. No history goes with it. */
     fun askAi(prompt: String) {
         lastActivityAt = System.currentTimeMillis()
+        // Give the reply room: the keyboard and big composer squeezed answers off screen (device 23:03).
+        keyboardController?.hide()
+        focusManager.clearFocus()
         if (!aiAvailable()) {
             addAssistant("AI isn't connected yet - this build sets itself up when you open it online, or see Settings > Account. Nothing was sent.")
             return
@@ -669,6 +644,43 @@ fun ChatHome(
                 isHtml = reply?.contains(Regex("<[a-z]+[ >]")) == true,
             )
             history?.append("assistant", if (reply != null) "cloud" else "local", finalText)
+        }
+    }
+
+    fun handleResult(result: CommandRouter.Result) {
+        when (result) {
+            is CommandRouter.Result.Reply -> {
+                if (result.text.startsWith("Profile '")) {
+                    activeProfile = router.activeProfile
+                    // Typed activation gets the same first-time conversation as the settings path.
+                    if (activeProfile == CommandRouter.REASONING && userContext.isEmpty()) showReasoningOnboarding = true
+                }
+                if (result.text == "Focus mode off.") activeProfile = null
+                addAssistant(result.text)
+            }
+            is CommandRouter.Result.DraftMessage -> handleDraft(result)
+            is CommandRouter.Result.ChooseApp -> addAssistant(
+                "I see more than one '${result.label}' here - which one?",
+                choiceApps = result.apps + AppEntry("Chat with AI", CHAT_WITH_AI_KEY, Intent()),
+                onChoice = { app ->
+                    if (app.packageName == CHAT_WITH_AI_KEY) {
+                        // Explicit tap only: sends the original text through the same per-message AI path.
+                        askAi(result.label)
+                    } else {
+                    keyboardController?.hide()
+                    focusManager.clearFocus()
+                    if (activeProfile == CommandRouter.REASONING && app.identityKey !in reasoningBypassed) {
+                        reasoningIntervention = app
+                    } else {
+                        addAssistant(router.execute(CommandRouter.Result.Launch(app)))
+                    }
+                    }
+                },
+            )
+            else -> {
+                val note = router.execute(result)
+                if (note.isNotEmpty()) addAssistant(note)
+            }
         }
     }
 
