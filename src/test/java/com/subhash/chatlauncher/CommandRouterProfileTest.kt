@@ -55,6 +55,35 @@ class CommandRouterProfileTest {
     }
 
     @Test
+    fun workDockIsExactlySlackClaudeGmail() {
+        val personal = AppEntry("Gmail", "com.google.android.gm", Intent())
+        val work = AppEntry("Gmail", "com.google.android.gm", Intent(), isWork = true, userSerial = 10L)
+        val slack = AppEntry("Slack", "com.Slack", Intent(), isWork = true, userSerial = 10L)
+        val claude = AppEntry("Claude", "com.anthropic.claude", Intent())
+        val teams = AppEntry("Teams", "com.microsoft.teams", Intent(), isWork = true, userSerial = 10L)
+        val dock = CommandRouter.workDockApps(listOf(personal, work, slack, claude, teams))
+        // Owner-stated order; work duplicate wins; Teams (other work app) excluded.
+        assertEquals(listOf(slack, claude, work), dock)
+    }
+
+    @Test
+    fun workDockPrefersWorkInstanceButFallsBackToPersonal() {
+        val personalSlack = AppEntry("Slack", "com.Slack", Intent())
+        val workSlack = AppEntry("Slack", "com.Slack", Intent(), isWork = true, userSerial = 10L)
+        assertEquals(listOf(workSlack), CommandRouter.workDockApps(listOf(personalSlack, workSlack)).take(1))
+        assertEquals(listOf(personalSlack), CommandRouter.workDockApps(listOf(personalSlack)).take(1))
+        assertTrue(CommandRouter.workDockApps(emptyList()).isEmpty())
+    }
+
+    @Test
+    fun workAccessPolicyUnchangedByDockFix() {
+        // Dock fix is display-only: Work launches/suggestions still see additions + managed apps.
+        router.saveProfile("Work", setOf("com.spotify.music"))
+        val eff = router.effectiveAllowed("Work", setOf("com.microsoft.teams@work:10"))
+        assertEquals(setOf("com.spotify.music", "com.microsoft.teams@work:10"), eff)
+    }
+
+    @Test
     fun builtInsCannotBeDeleted() {
         router.deleteProfile("Focus")
         router.deleteProfile("Work")
