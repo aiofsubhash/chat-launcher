@@ -709,7 +709,7 @@ fun ChatHome(
         // A dispatched command leaves the app or opens a dialog/chooser: drop the keyboard so
         // the launcher never sits behind a stuck IME (device report: "Opening Instagram" with
         // the keyboard up indefinitely). Drafts still asking for their body keep it.
-        if (result is CommandRouter.Result.Launch || result is CommandRouter.Result.UberRide ||
+        if (result is CommandRouter.Result.Launch || result is CommandRouter.Result.UberRide || result is CommandRouter.Result.Dial ||
             result is CommandRouter.Result.ChooseApp ||
             (result is CommandRouter.Result.DraftMessage && result.text != null)
         ) {
