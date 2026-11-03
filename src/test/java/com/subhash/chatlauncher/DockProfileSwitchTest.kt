@@ -98,7 +98,6 @@ class DockProfileSwitchTest {
         composeRule.onNodeWithText("write what you want to do").performTextInput("Spot")
         composeRule.waitForIdle()
         assertTrue("Spotify must not be searchable in Focus", !dockShows("Spotify"))
-        composeRule.onNodeWithText("write what you want to do").performTextInput("") 
         composeRule.onNodeWithContentDescription("Settings").performClick()
         composeRule.onAllNodesWithText("Off")[0].performClick()
         composeRule.onNodeWithText("Save").performClick()
