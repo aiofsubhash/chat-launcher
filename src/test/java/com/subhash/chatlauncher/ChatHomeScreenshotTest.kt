@@ -78,7 +78,14 @@ class ChatHomeScreenshotTest {
         object : Statement() {
             override fun evaluate() {
                 installFakeApps()
-                base.evaluate()
+                // Pin the top-bar clock: the display formats the real time, which made
+                // renders flaky by wall-clock minute (14:19 vs 14:51 golden diff).
+                AppClock.nowMillis = { 1730700000000L }
+                try {
+                    base.evaluate()
+                } finally {
+                    AppClock.nowMillis = { System.currentTimeMillis() }
+                }
             }
         }
     }
