@@ -503,7 +503,7 @@ class ChatHomeScreenshotTest {
         composeRule.waitForIdle()
         // Unpaired open text goes straight to connection guidance (owner 22:52/main 23:01) -
         // no note chip, nothing sent.
-        composeRule.onNodeWithText("Ask AI needs a connection first - tap the pairing link you were sent, or see Settings > Account. Nothing was sent.").assertExists()
+        composeRule.onNodeWithText("AI isn't connected yet - this build sets itself up when you open it online, or see Settings > Account. Nothing was sent.").assertExists()
         composeRule.onRoot().captureRoboImage()
     }
 
@@ -823,7 +823,7 @@ class ChatHomeScreenshotTest {
         composeRule.onNodeWithText("write what you want to do").performTextInput("what's up")
         composeRule.onNodeWithText("what's up").performImeAction()
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Ask AI needs a connection first - tap the pairing link you were sent, or see Settings > Account. Nothing was sent.").assertExists()
+        composeRule.onNodeWithText("AI isn't connected yet - this build sets itself up when you open it online, or see Settings > Account. Nothing was sent.").assertExists()
         composeRule.onNodeWithText("Noted - that's saved in history on this phone.", substring = true).assertDoesNotExist()
     }
 
@@ -1253,4 +1253,35 @@ class ChatHomeScreenshotTest {
         composeRule.onNodeWithText("drums").assertExists()
         composeRule.onRoot().captureRoboImage()
     }
+
+    private fun enrollmentBanner(message: String) {
+        val prefs = composeRule.activity.getSharedPreferences("chat_launcher", android.content.Context.MODE_PRIVATE)
+        composeRule.mainClock.autoAdvance = false
+        composeRule.activity.setContent {
+            MaterialTheme(colorScheme = calmColors) {
+                ChatHome(
+                    router = CommandRouter(composeRule.activity, prefs),
+                    pairMessage = message,
+                    resolveApps = { emptyList() },
+                    shareTargets = { emptyList() },
+                    allApps = { emptyList() },
+                    sendToLlm = { _, _ -> null },
+                    launchApp = { true },
+                )
+            }
+        }
+        composeRule.mainClock.advanceTimeBy(600)
+        composeRule.onNodeWithText(message).assertExists()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Automatic enrollment banners rendered from the real coordinator's own message constants. */
+    @Test
+    fun enrollmentSettingUpBanner() = enrollmentBanner(EnrollmentCoordinator.MSG_SETTING_UP)
+
+    @Test
+    fun enrollmentConnectedBanner() = enrollmentBanner(EnrollmentCoordinator.MSG_CONNECTED)
+
+    @Test
+    fun enrollmentNeedsRenewalBanner() = enrollmentBanner(EnrollmentCoordinator.MSG_NEEDS_RENEWAL)
 }
