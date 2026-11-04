@@ -304,3 +304,82 @@ test('upstream 429 with non-JSON body -> unparsed_body, nothing relayed', async 
   assert.equal(JSON.parse(body).error.upstream.kind, 'unparsed_body');
   assert.ok(!body.includes('SECRETPROMPT'));
 });
+
+
+// ---- Workers AI free fallback ----
+const EP_OK = () => new Response(JSON.stringify({data:{id:'xingchen-agi/xing4.0-29b-a4b:free',endpoints:[{tag:'phala',model_id:'xingchen-agi/xing4.0-29b-a4b:free',pricing:{prompt:'0',completion:'0'}}]}}));
+const phala429 = () => setFetch(async (url) => String(url).includes('/endpoints') ? EP_OK() : new Response(JSON.stringify({error:{code:429,message:'Provider returned error',metadata:{provider_name:'Phala',raw:'rate limit'}}}),{status:429}));
+function aiStream(text) { return new Blob([text]).stream(); }
+// Mirrors LlmClient.parseSseDelta (Android): "data: " lines, choices[0].delta.content, [DONE] ignored.
+function parseDelta(line) {
+  if (!line.startsWith('data: ')) return null;
+  const p = line.slice(6).trim(); if (p === '[DONE]') return null;
+  try { const c = JSON.parse(p).choices[0].delta.content; return c ? c : null; } catch { return null; }
+}
+const GOOD_SSE = 'data: {"choices":[{"delta":{"role":"assistant"}}]}\n\ndata: {"choices":[{"delta":{"content":"Hel"}}]}\n\ndata: {"choices":[{"delta":{"content":"lo"}}]}\n\ndata: [DONE]\n\n';
+
+test('workers-ai fallback: Phala 429 -> 200 SSE parsed like the app, correct model/params, user text only', async () => {
+  phala429(); const calls = [];
+  const env = makeEnv({ AI: { run: async (m, a) => { calls.push([m, a]); return aiStream(GOOD_SSE); } } });
+  const res = await handleRequest(makeReq(), env, {}, FIXED_NOW);
+  assert.equal(res.status, 200);
+  assert.ok((res.headers.get('content-type') || '').includes('text/event-stream'));
+  const body = await res.text();
+  const text = body.split('\n').map(parseDelta).filter(Boolean).join('');
+  assert.equal(text, 'Hello');
+  assert.ok(body.includes('[DONE]'));
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], '@cf/google/gemma-4-26b-a4b-it');
+  assert.deepEqual(calls[0][1].messages, [{ role: 'user', content: 'hello' }]);
+  assert.equal(calls[0][1].stream, true);
+  assert.equal(calls[0][1].max_completion_tokens, 600);
+  assert.deepEqual(calls[0][1].chat_template_kwargs, { enable_thinking: false });
+  for (const k of ['tools', 'tool_choice', 'store', 'provider', 'plugins']) assert.ok(!(k in calls[0][1]), k);
+});
+
+test('workers-ai fallback not used when OpenRouter route succeeds', async () => {
+  setFetch(async (url) => String(url).includes('/endpoints') ? EP_OK() : sseResponse());
+  let n = 0; const env = makeEnv({ AI: { run: async () => { n++; return aiStream(GOOD_SSE); } } });
+  const res = await handleRequest(makeReq(), env, {}, FIXED_NOW);
+  assert.equal(res.status, 200); await res.text(); assert.equal(n, 0);
+});
+
+test('workers-ai fallback: AI throws capacity error -> 502 fixed labels, error text not relayed', async () => {
+  phala429();
+  const env = makeEnv({ AI: { run: async () => { throw new Error('3040: Out of capacity SECRETPROMPT https://x.example'); } } });
+  const res = await handleRequest(makeReq(), env, {}, FIXED_NOW);
+  assert.equal(res.status, 502);
+  const b = await res.text(); const j = JSON.parse(b);
+  assert.equal(j.error.upstream.fallback, 'workers_ai_capacity');
+  assert.ok(!/SECRETPROMPT|x\.example/.test(b), b);
+});
+
+test('workers-ai fallback: non-stream response -> 502 bad_response', async () => {
+  phala429();
+  const env = makeEnv({ AI: { run: async () => ({ response: 'x' }) } });
+  const res = await handleRequest(makeReq(), env, {}, FIXED_NOW);
+  assert.equal(res.status, 502);
+  assert.equal(JSON.parse(await res.text()).error.upstream.fallback, 'workers_ai_bad_response');
+});
+
+test('no AI binding -> previous 502 behaviour, no fallback field', async () => {
+  phala429();
+  const res = await handleRequest(makeReq(), makeEnv(), {}, FIXED_NOW);
+  assert.equal(res.status, 502);
+  assert.equal(JSON.parse(await res.text()).error.upstream.fallback, undefined);
+});
+
+test('workers-ai fallback: unauthenticated request never reaches AI', async () => {
+  phala429(); let n = 0;
+  const env = makeEnv({ AI: { run: async () => { n++; return aiStream(GOOD_SSE); } } });
+  const res = await handleRequest(makeReq({ headers: { 'X-Tester-Token': 'wrong' } }), env, {}, FIXED_NOW);
+  assert.equal(res.status, 401); assert.equal(n, 0);
+});
+
+test('workers-ai fallback: quota still enforced (7th request in a minute -> 429, AI not called)', async () => {
+  phala429(); let n = 0;
+  const env = makeEnv({ AI: { run: async () => { n++; return aiStream(GOOD_SSE); } } });
+  let last;
+  for (let i = 0; i < 7; i++) { last = await handleRequest(makeReq(), env, {}, FIXED_NOW); await last.text(); }
+  assert.equal(last.status, 429); assert.equal(n, 6);
+});
