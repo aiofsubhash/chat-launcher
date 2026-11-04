@@ -1,6 +1,11 @@
 name: build-unsigned
 on:
   workflow_dispatch:
+    inputs:
+      ticket:
+        description: optional one-use enrollment ticket for the live AI end-to-end check
+        required: false
+        default: ''
   push:
     branches: [wip-device-feedback]
     paths-ignore: ['**.md']
@@ -23,6 +28,11 @@ jobs:
         run: gradle testDebugUnitTest --console=plain
       - name: Render checks
         run: gradle recordRoborazziDebug --console=plain
+      - name: Live AI end-to-end (only when a ticket is given)
+        if: ${{ inputs.ticket != '' }}
+        env:
+          LIVE_AI_TICKET: ${{ inputs.ticket }}
+        run: gradle recordRoborazziDebug --tests 'com.subhash.chatlauncher.LiveAiEndToEndTest' --console=plain -i
       - name: Assemble (no ticket, no secrets)
         run: gradle assembleDebug --console=plain
       - uses: actions/upload-artifact@v4
