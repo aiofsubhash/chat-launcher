@@ -1,0 +1,38 @@
+name: live-ai-e2e
+on:
+  workflow_dispatch:
+    inputs:
+      ticket:
+        description: one-use enrollment ticket (expires in minutes, consumed on first use)
+        required: true
+permissions:
+  contents: read
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Mask ticket
+        run: echo "::add-mask::${{ inputs.ticket }}"
+      - uses: actions/checkout@v4
+        with:
+          ref: wip-device-feedback
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Live app end-to-end (real redeem, real client, real UI)
+        env:
+          LIVE_AI_TICKET: ${{ inputs.ticket }}
+        run: gradle recordRoborazziDebug --tests 'com.subhash.chatlauncher.LiveAiEndToEndTest' --console=plain -i
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-ai-e2e
+          retention-days: 3
+          path: |
+            build/outputs/roborazzi/*.png
+            build/test-results/**/*LiveAiEndToEndTest*.xml
