@@ -10,3 +10,8 @@ preview_urls = false
 binding = "QUOTA_DB"
 database_name = "chat-launcher-quota"
 database_id = "b6b10595-fc18-420b-9192-4dfc6383cbb2"
+
+
+# Workers AI binding for the free zero-retention fallback (Workers Free allocation; no AI Gateway).
+[ai]
+binding = "AI"
