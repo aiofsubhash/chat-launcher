@@ -1284,4 +1284,83 @@ class ChatHomeScreenshotTest {
 
     @Test
     fun enrollmentNeedsRenewalBanner() = enrollmentBanner(EnrollmentCoordinator.MSG_NEEDS_RENEWAL)
+
+    /** Device report Nov 3 23:02: Normal -> Focus -> Normal (via Settings) must keep the Normal stickies. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsProfileRoundTripKeepsNormalDock() {
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("a")
+        composeRule.onNodeWithText("a").performTextClearance()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Maps").assertExists()
+        composeRule.onNodeWithText("Chrome").assertExists()
+        // Normal -> Focus through the real Settings page.
+        composeRule.onNodeWithContentDescription("Settings").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Show profiles").performClick()
+        composeRule.onAllNodesWithText("Focus")[0].performClick()
+        composeRule.onNodeWithText("Save").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Timer").assertExists()
+        composeRule.onNodeWithText("Maps").assertDoesNotExist()
+        // Focus -> Normal.
+        composeRule.onNodeWithContentDescription("Settings").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Show profiles").performClick()
+        composeRule.onAllNodesWithText("Normal")[0].performClick()
+        composeRule.onNodeWithText("Save").performClick()
+        composeRule.waitForIdle()
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodesWithText("Maps").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("Maps").assertExists()
+        composeRule.onNodeWithText("Chrome").assertExists()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Same round trip with typed commands. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun typedProfileRoundTripKeepsNormalDock() {
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("focus Focus")
+        composeRule.onNodeWithText("Send").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Timer").assertExists()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("focus off")
+        composeRule.onNodeWithText("Send").performClick()
+        composeRule.waitForIdle()
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodesWithText("Maps").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("Maps").assertExists()
+        composeRule.onNodeWithText("Chrome").assertExists()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Owner Nov 3 23:05: typed text with app matches shows "Chat with AI" as the last option. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun chatWithAiIsLastSuggestion() {
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("ch")
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Chrome").assertExists()
+        composeRule.onNodeWithText("Chat with AI").assertExists()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** No app match at all still offers Chat with AI; unpaired tap explains instead of sending. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun chatWithAiOfferedWithNoAppMatchUnpaired() {
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("zzqx")
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Chat with AI").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("AI isn't connected yet - this build sets itself up when you open it online, or see Settings > Account. Nothing was sent.").assertExists()
+        composeRule.onRoot().captureRoboImage()
+    }
 }
