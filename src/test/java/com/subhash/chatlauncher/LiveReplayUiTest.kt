@@ -3,6 +3,8 @@ package com.subhash.chatlauncher
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -31,7 +33,7 @@ class LiveReplayUiTest {
     @get:Rule
     val composeRule = createAndroidComposeRule<MainActivity>()
 
-    private val sse = """data: {"id":"f86a18e415434950b85f509721024979","object":"chat.completion.chunk","created":1793812667,"model":"@cf/google/gemma-4-26b-a4b-it-external","choices":[{"index":0,"delta":{"reasoning_content":null,"role":"assistant","content":""},"logprobs":null,"finish_reason":null,"matched_stop":null}],"usage":{"prompt_tokens":25,"completion_tokens":0,"total_tokens":25,"prompt_tokens_details":{"cached_tokens":0},"neurons":0.22727271914482117},"p":"j2gpa07dvy4kf5o5tiple3rio1fha"}
+    @Volatile private var sse = """data: {"id":"f86a18e415434950b85f509721024979","object":"chat.completion.chunk","created":1793812667,"model":"@cf/google/gemma-4-26b-a4b-it-external","choices":[{"index":0,"delta":{"reasoning_content":null,"role":"assistant","content":""},"logprobs":null,"finish_reason":null,"matched_stop":null}],"usage":{"prompt_tokens":25,"completion_tokens":0,"total_tokens":25,"prompt_tokens_details":{"cached_tokens":0},"neurons":0.22727271914482117},"p":"j2gpa07dvy4kf5o5tiple3rio1fha"}
 
 data: {"id":"f86a18e415434950b85f509721024979","object":"chat.completion.chunk","created":1793812667,"model":"@cf/google/gemma-4-26b-a4b-it-external","choices":[{"index":0,"delta":{"reasoning_content":null,"content":"Paris"},"logprobs":null,"finish_reason":null,"matched_stop":null}],"usage":{"prompt_tokens":0,"completion_tokens":1,"total_tokens":1,"prompt_tokens_details":{"cached_tokens":0},"neurons":0.027272727340459824},"p":"6z5ngkk1dvblya0sif667k4z3he9gf5otu7vj"}
 
@@ -105,6 +107,53 @@ data: [DONE]
         assertEquals("Bearer replay-test-credential", seenAuth)
         assertTrue("request must be one user message: $seenBody", seenBody.contains("France") && seenBody.contains("\"stream\":true"))
         assertTrue("UI never showed the streamed answer", shown)
+        assertTrue("no error bubble", composeRule.onAllNodesWithText("couldn't answer", substring = true, ignoreCase = true).fetchSemanticsNodes().isEmpty() &&
+            composeRule.onAllNodesWithText("Couldn't reach", substring = true, ignoreCase = true).fetchSemanticsNodes().isEmpty())
+    }
+
+    /**
+     * Long answer + keyboard. SYNTHETIC replay text (not model output, no inference): about 14 lines
+     * streamed in many deltas through the real LlmClient and real MainActivity. Checks the keyboard
+     * is not visible after Send, the last line of the answer is in the semantics tree, and no error
+     * bubble. Roborazzi insets are best effort: imeBefore is recorded so a weak "before" is visible.
+     */
+    @Test
+    fun longAnswerWithKeyboardDownOnSend() {
+        val paras = (1..14).map { "Line $it: Paris became the capital of France over many centuries as the Capetian kings consolidated power there and the city grew in trade, learning and administration." }
+        val chunks = paras.mapIndexed { i, p ->
+            val c = (p + (if (i == paras.lastIndex) " END-OF-LONG-ANSWER" else "") + "\\n").replace("\"", "'")
+            """data: {"id":"x","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"$c"},"finish_reason":null}]}"""
+        }
+        sse = chunks.joinToString("\n\n") + "\n\ndata: {\"id\":\"x\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+        val prefs = composeRule.activity.getSharedPreferences("chat_launcher", android.content.Context.MODE_PRIVATE)
+        prefs.edit().putString("api_key", "replay-test-credential")
+            .putString("chat_endpoint", "http://127.0.0.1:${server.localPort}/v1/chat/completions").commit()
+        composeRule.activityRule.scenario.recreate()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do")
+            .performTextInput("explain why paris is the capital of france in detail")
+        composeRule.waitForIdle()
+        fun imeVisible(): Boolean {
+            var v = false
+            composeRule.activityRule.scenario.onActivity { a ->
+                val ins = ViewCompat.getRootWindowInsets(a.window.decorView)
+                v = ins?.isVisible(WindowInsetsCompat.Type.ime()) == true
+            }
+            return v
+        }
+        val imeBefore = imeVisible()
+        composeRule.onNodeWithText("Send").performClick()
+        val deadline = System.currentTimeMillis() + 20_000
+        var shown = false
+        while (System.currentTimeMillis() < deadline && !shown) {
+            Thread.sleep(200)
+            composeRule.waitForIdle()
+            shown = composeRule.onAllNodesWithText("END-OF-LONG-ANSWER", substring = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        captureScreenRoboImage("build/outputs/roborazzi/replay_ui_long_answer.png")
+        println("LONGANSWER imeBefore=" + imeBefore + " imeAfter=" + imeVisible() + " shown=" + shown)
+        assertTrue("keyboard still visible after Send (imeBefore=$imeBefore)", !imeVisible())
+        assertTrue("long answer end never shown", shown)
         assertTrue("no error bubble", composeRule.onAllNodesWithText("couldn't answer", substring = true, ignoreCase = true).fetchSemanticsNodes().isEmpty() &&
             composeRule.onAllNodesWithText("Couldn't reach", substring = true, ignoreCase = true).fetchSemanticsNodes().isEmpty())
     }
