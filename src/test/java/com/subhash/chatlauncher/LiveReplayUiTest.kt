@@ -7,7 +7,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.captureScreenRoboImage
-import com.sun.net.httpserver.HttpServer
+import java.net.ServerSocket
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -17,7 +17,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
-import java.net.InetSocketAddress
 
 /**
  * Real MainActivity UI + real LlmClient.chatStream over real HTTP, against a LOCAL server that
@@ -45,32 +44,51 @@ data: {"response":"","usage":{"prompt_tokens":25,"completion_tokens":2,"total_to
 data: [DONE]
 
 """
-    private lateinit var server: HttpServer
-    private var seenAuth: String? = null
-    private var seenBody: String = ""
+    private lateinit var server: ServerSocket
+    @Volatile private var seenAuth: String? = null
+    @Volatile private var seenBody: String = ""
 
     @Before
     fun up() {
-        server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
-        server.createContext("/v1/chat/completions") { ex ->
-            seenAuth = ex.requestHeaders.getFirst("Authorization")
-            seenBody = ex.requestBody.readBytes().toString(Charsets.UTF_8)
-            val bytes = sse.toByteArray()
-            ex.responseHeaders.add("Content-Type", "text/event-stream")
-            ex.sendResponseHeaders(200, bytes.size.toLong())
-            ex.responseBody.use { it.write(bytes) }
-        }
-        server.start()
+        server = ServerSocket(0, 5, java.net.InetAddress.getByName("127.0.0.1"))
+        Thread {
+            try {
+                while (!server.isClosed) {
+                    val s = server.accept()
+                    s.use { sock ->
+                        val inp = sock.getInputStream()
+                        val head = StringBuilder()
+                        while (!head.endsWith("\r\n\r\n")) {
+                            val c = inp.read()
+                            if (c < 0) break
+                            head.append(c.toChar())
+                        }
+                        val lines = head.toString().split("\r\n")
+                        seenAuth = lines.firstOrNull { it.startsWith("Authorization:", true) }?.substringAfter(":")?.trim()
+                        val len = lines.firstOrNull { it.startsWith("Content-Length:", true) }?.substringAfter(":")?.trim()?.toInt() ?: 0
+                        val buf = ByteArray(len)
+                        var off = 0
+                        while (off < len) { val n = inp.read(buf, off, len - off); if (n < 0) break; off += n }
+                        seenBody = String(buf, Charsets.UTF_8)
+                        val bytes = sse.toByteArray()
+                        val out = sock.getOutputStream()
+                        out.write(("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: " + bytes.size + "\r\nConnection: close\r\n\r\n").toByteArray())
+                        out.write(bytes)
+                        out.flush()
+                    }
+                }
+            } catch (e: Exception) { /* server closed */ }
+        }.apply { isDaemon = true; start() }
     }
 
     @After
-    fun down() { server.stop(0) }
+    fun down() { server.close() }
 
     @Test
     fun realUiShowsStreamedAnswer() {
         val prefs = composeRule.activity.getSharedPreferences("chat_launcher", android.content.Context.MODE_PRIVATE)
         prefs.edit().putString("api_key", "replay-test-credential")
-            .putString("chat_endpoint", "http://127.0.0.1:${server.address.port}/v1/chat/completions").commit()
+            .putString("chat_endpoint", "http://127.0.0.1:${server.localPort}/v1/chat/completions").commit()
         composeRule.activityRule.scenario.recreate()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("write what you want to do")
