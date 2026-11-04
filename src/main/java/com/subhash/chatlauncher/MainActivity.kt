@@ -1031,7 +1031,9 @@ fun ChatHome(
                         }
                     }
                     // Suggestions sit inline left of Send, not above the composer.
-                    if (suggestions.isNotEmpty()) {
+                    // Owner Nov 3 23:05: "Chat with AI" is always the LAST option once something is typed
+                    // (even with zero app matches); an explicit tap sends only this text to the AI.
+                    if (input.isNotBlank()) {
                         LazyRow(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                             items(suggestions) { app ->
                                 Surface(
@@ -1052,6 +1054,25 @@ fun ChatHome(
                                         ),
                                 ) {
                                     Text(app.displayLabel, fontSize = 14.sp, modifier = Modifier.heightIn(min = 48.dp).wrapContentHeight().padding(horizontal = 12.dp))
+                                }
+                            }
+                            item {
+                                Surface(
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                    modifier = Modifier
+                                        .padding(end = 8.dp)
+                                        .clickable {
+                                            val raw = input.trim()
+                                            if (raw.isNotEmpty()) {
+                                                lastActivityAt = System.currentTimeMillis()
+                                                input = ""
+                                                addUser(raw)
+                                                askAi(raw)
+                                            }
+                                        },
+                                ) {
+                                    Text("Chat with AI", fontSize = 14.sp, modifier = Modifier.heightIn(min = 48.dp).wrapContentHeight().padding(horizontal = 12.dp))
                                 }
                             }
                         }
