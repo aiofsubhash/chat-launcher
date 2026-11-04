@@ -282,3 +282,25 @@ test('v0.4 compatibility rejects changed scaffold and extra history',async()=>{
  const body={"model": "nvidia/nemotron-3-ultra-550b-a55b:free", "max_tokens": 1024, "messages": [{"role": "system", "content": "You are the voice of a chat-first Android launcher. Be brief and plain. You cannot perform device actions yourself; the launcher app handles app launches and message drafts. When visual formatting genuinely helps, you may answer in simple HTML (no scripts)."}, {"role": "user", "content": "Say hello. Synthetic compatibility test with no personal data."}], "provider": {"max_price": {"prompt": "0", "completion": "0"}}, "stream": true};mutate(body);let calls=0;setFetch(async()=>{calls++;return sseResponse();});const r=await handleRequest(makeReq({body:JSON.stringify(body)}),makeEnv(),{},FIXED_NOW);assert.equal(r.status,400);assert.equal(calls,0);
  }
 });
+
+
+test('upstream 429 -> 502 with only fixed-label diagnostics, no upstream text/urls/raw relayed', async () => {
+  setFetch(async (url) => String(url).includes('/endpoints') ? new Response(JSON.stringify({data:{id:'xingchen-agi/xing4.0-29b-a4b:free',endpoints:[{tag:'phala',model_id:'xingchen-agi/xing4.0-29b-a4b:free',pricing:{prompt:'0',completion:'0'}}]}})) :
+    new Response(JSON.stringify({error:{code:429,message:'xing is temporarily rate-limited upstream https://evil.example SECRETPROMPT',metadata:{provider_name:'Phala',raw:'Too many requests SECRETPROMPT'}}}),{status:429}));
+  const res = await handleRequest(makeReq(), makeEnv(), {}, FIXED_NOW);
+  assert.equal(res.status, 502);
+  const body = await res.text();
+  const j = JSON.parse(body);
+  assert.equal(j.error.message, 'upstream_rate_limit');
+  assert.deepEqual(j.error.upstream, {code:429, provider:'Phala', kind:'provider_temporarily_limited', provider_body:'rate_limit_text'});
+  assert.ok(!/SECRETPROMPT|evil/.test(body), body);
+});
+
+test('upstream 429 with non-JSON body -> unparsed_body, nothing relayed', async () => {
+  setFetch(async (url) => String(url).includes('/endpoints') ? new Response(JSON.stringify({data:{id:'xingchen-agi/xing4.0-29b-a4b:free',endpoints:[{tag:'phala',model_id:'xingchen-agi/xing4.0-29b-a4b:free',pricing:{prompt:'0',completion:'0'}}]}})) :
+    new Response('SECRETPROMPT <html>',{status:429}));
+  const res = await handleRequest(makeReq(), makeEnv(), {}, FIXED_NOW);
+  const body = await res.text();
+  assert.equal(JSON.parse(body).error.upstream.kind, 'unparsed_body');
+  assert.ok(!body.includes('SECRETPROMPT'));
+});
