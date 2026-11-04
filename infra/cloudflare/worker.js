@@ -92,6 +92,32 @@ async function classifyUpstream429(res) {
   return out;
 }
 
+// Free fallback: Cloudflare Workers AI on the Workers Free plan (zero data retention, no training;
+// 10,000 free Neurons/day, then requests fail - no paid plan or AI Gateway is configured).
+// Used only after the OpenRouter route failed. No logging, caching or storage of content.
+const WORKERS_AI_MODEL = '@cf/google/gemma-4-26b-a4b-it';
+async function workersAiStream(env, userText, signal) {
+  if (!env.AI || typeof env.AI.run !== 'function') return { stream: null, kind: 'workers_ai_not_configured' };
+  const abort = new Promise((_, rej) => signal.addEventListener('abort', () => rej(new Error('aborted')), { once: true }));
+  try {
+    const out = await Promise.race([
+      env.AI.run(WORKERS_AI_MODEL, {
+        messages: [{ role: 'user', content: userText }],
+        stream: true,
+        max_completion_tokens: MAX_OUTPUT_TOKENS,
+        chat_template_kwargs: { enable_thinking: false },
+      }),
+      abort,
+    ]);
+    if (out && typeof out.getReader === 'function') return { stream: out, kind: 'ok' };
+    return { stream: null, kind: 'workers_ai_bad_response' };
+  } catch (e) {
+    if (signal.aborted) throw e;
+    const m = String((e && e.message) || '');
+    return { stream: null, kind: /429|3040|capacity|limit|neuron/i.test(m) ? 'workers_ai_capacity' : 'workers_ai_error' };
+  }
+}
+
 async function readBoundedBody(request, limit) {
   if (!request.body) return '';
   const reader = request.body.getReader();
@@ -227,7 +253,12 @@ async function handleRequest(request, env, ctx, now = new Date(), catalog = CATA
         upstream = null;
         if (status === 401 || status === 402 || ![404,408,429].includes(status) && status < 500) break;
       }
-      if (!upstream) { clearTimeout(timer); return errorResponse(502,lastCategory,safeHeaders,lastCategory==='upstream_rate_limit'?detail:undefined); }
+      if (!upstream) {
+        const wai = await workersAiStream(env, userText, controller.signal);
+        if (wai.stream) upstream = { body: wai.stream };
+        else if (wai.kind !== 'workers_ai_not_configured') detail = { ...(detail || {}), fallback: wai.kind };
+      }
+      if (!upstream) { clearTimeout(timer); return errorResponse(502,lastCategory,safeHeaders,detail); }
     } catch (err) {
       clearTimeout(timer);
       if (controller.signal.aborted) return errorResponse(504,'request timed out');
