@@ -47,11 +47,49 @@ class HttpError extends Error {
   }
 }
 
-function errorResponse(status, message, safeHeaders = {}) {
-  return new Response(JSON.stringify({ error: { message, type: 'proxy_error' } }), {
+function errorResponse(status, message, safeHeaders = {}, detail) {
+  return new Response(JSON.stringify({ error: { message, type: 'proxy_error', ...(detail ? { upstream: detail } : {}) } }), {
     status,
     headers: { 'Content-Type': 'application/json', ...safeHeaders },
   });
+}
+
+// Diagnostic only: classify an upstream 429 body into fixed labels. Never relays upstream text,
+// metadata.raw, URLs or echoed payloads. Reads at most 2 KB; nothing is stored or logged.
+async function classifyUpstream429(res) {
+  const out = { code: 429, provider: 'unknown', kind: 'other' };
+  try {
+    const reader = res.body && res.body.getReader();
+    if (!reader) return out;
+    let text = '', size = 0;
+    const dec = new TextDecoder();
+    while (size < 2048) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      text += dec.decode(value, { stream: true });
+    }
+    reader.cancel().catch(() => {});
+    text = text.slice(0, 2048);
+    let j = null;
+    try { j = JSON.parse(text); } catch {}
+    const e = j && typeof j === 'object' ? j.error : null;
+    const msg = String((e && e.message) || '').toLowerCase();
+    const prov = String((e && e.metadata && e.metadata.provider_name) || '');
+    if (/^[A-Za-z0-9 ._-]{1,40}$/.test(prov)) out.provider = prov;
+    if (!e) out.kind = 'unparsed_body';
+    else if (/free.?model|free-models|per.?day|daily/.test(msg)) out.kind = 'free_daily_cap';
+    else if (/per.?minute|requests per min/.test(msg)) out.kind = 'per_minute_cap';
+    else if (/temporarily.*rate.?limited|rate.?limited upstream/.test(msg)) out.kind = 'provider_temporarily_limited';
+    else if (/provider returned error/.test(msg)) out.kind = 'provider_error';
+    else if (/rate.?limit/.test(msg)) out.kind = 'rate_limited_other';
+    const rawStr = e && e.metadata && typeof e.metadata.raw === 'string' ? e.metadata.raw.toLowerCase() : '';
+    if (rawStr) {
+      if (/rate.?limit|too many requests|429/.test(rawStr)) out.provider_body = 'rate_limit_text';
+      else out.provider_body = 'other_text';
+    }
+  } catch {}
+  return out;
 }
 
 async function readBoundedBody(request, limit) {
@@ -147,6 +185,7 @@ async function handleRequest(request, env, ctx, now = new Date(), catalog = CATA
     let upstream;
     let lastCategory = 'no_eligible_route';
     let safeHeaders = {};
+    let detail;
     try {
       const config = await env.QUOTA_DB.prepare('SELECT model, provider FROM model_routes WHERE enabled = 1 ORDER BY priority, model LIMIT 16').all();
       const routes = [...new Map((config.results || []).map(r => [r.model, r])).values()];
@@ -176,6 +215,7 @@ async function handleRequest(request, env, ctx, now = new Date(), catalog = CATA
         if (upstream.ok && upstream.body && (upstream.headers.get('content-type') || '').includes('text/event-stream')) break;
         const status = upstream.status;
         if (status === 429) {
+          detail = await classifyUpstream429(upstream);
           safeHeaders = {'X-Proxy-RateLimit-Origin': upstream.headers.has('X-RateLimit-Limit') ? 'platform' : 'unknown'};
           for (const name of ['Retry-After','X-RateLimit-Limit','X-RateLimit-Remaining','X-RateLimit-Reset']) {
             const v=upstream.headers.get(name);
@@ -187,7 +227,7 @@ async function handleRequest(request, env, ctx, now = new Date(), catalog = CATA
         upstream = null;
         if (status === 401 || status === 402 || ![404,408,429].includes(status) && status < 500) break;
       }
-      if (!upstream) { clearTimeout(timer); return errorResponse(502,lastCategory,safeHeaders); }
+      if (!upstream) { clearTimeout(timer); return errorResponse(502,lastCategory,safeHeaders,lastCategory==='upstream_rate_limit'?detail:undefined); }
     } catch (err) {
       clearTimeout(timer);
       if (controller.signal.aborted) return errorResponse(504,'request timed out');
