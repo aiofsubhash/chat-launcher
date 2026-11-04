@@ -1377,4 +1377,26 @@ class ChatHomeScreenshotTest {
         composeRule.onNodeWithText("AI isn't connected yet - this build sets itself up when you open it online, or see Settings > Account. Nothing was sent.").assertExists()
         composeRule.onRoot().captureRoboImage()
     }
+
+    /** Settings Save must preserve a Timer note chosen for the Normal dock (it is not in the installed-app list). */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsSaveKeepsTimerOnNormalDock() {
+        val p = ApplicationProvider.getApplicationContext<android.content.Context>().getSharedPreferences("chat_launcher", 0)
+        p.edit().putString("dock_apps", "com.android.chrome,special:timer").commit()
+        composeRule.activityRule.scenario.recreate()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("a")
+        composeRule.onNodeWithText("a").performTextClearance()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Timer").assertExists()
+        composeRule.onNodeWithContentDescription("Settings").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Save").performClick()
+        composeRule.waitForIdle()
+        org.junit.Assert.assertEquals("chrome,timer must survive Save", "com.android.chrome,special:timer", p.getString("dock_apps", null))
+        composeRule.onNodeWithText("Timer").assertExists()
+        composeRule.onRoot().captureRoboImage()
+        p.edit().remove("dock_apps").commit()
+    }
 }
