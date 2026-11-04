@@ -1304,7 +1304,8 @@ fun SettingsDialog(
                 val newActive = stagedActive?.takeIf { it in finalAllowed.keys }
                 router.activeProfile = newActive
                 onActiveProfile(newActive)
-                onDockApps(apps.map { it.identityKey }.filter { it in dockSelected })
+                // Keep the Timer note: it is a special dock key, never in the installed-app list.
+                onDockApps(apps.map { it.identityKey }.filter { it in dockSelected } + listOfNotNull(CommandRouter.TIMER_KEY.takeIf { it in dockSelected }))
                 onClose()
             }
             router.apiKey = key.trim()
