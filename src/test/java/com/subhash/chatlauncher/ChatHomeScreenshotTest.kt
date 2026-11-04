@@ -1285,6 +1285,12 @@ class ChatHomeScreenshotTest {
     @Test
     fun enrollmentNeedsRenewalBanner() = enrollmentBanner(EnrollmentCoordinator.MSG_NEEDS_RENEWAL)
 
+
+    /** Snapshot of which candidate apps currently show on the home dock (nothing typed, so only dock notes match). */
+    private fun dockSnapshot(): Map<String, Int> =
+        listOf("WhatsApp", "Chrome", "Maps", "Spotify", "PhonePe", "Gmail", "Instagram", "Timer", "Camera")
+            .associateWith { composeRule.onAllNodesWithText(it).fetchSemanticsNodes().size }
+
     /** Device report Nov 3 23:02: Normal -> Focus -> Normal (via Settings) must keep the Normal stickies. */
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
@@ -1295,6 +1301,7 @@ class ChatHomeScreenshotTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("Maps").assertExists()
         composeRule.onNodeWithText("Chrome").assertExists()
+        val before = dockSnapshot()
         // Normal -> Focus through the real Settings page.
         composeRule.onNodeWithContentDescription("Settings").performClick()
         composeRule.waitForIdle()
@@ -1316,6 +1323,7 @@ class ChatHomeScreenshotTest {
         }
         composeRule.onNodeWithText("Maps").assertExists()
         composeRule.onNodeWithText("Chrome").assertExists()
+        org.junit.Assert.assertEquals("Normal dock must be exactly as before the Focus round trip", before, dockSnapshot())
         composeRule.onRoot().captureRoboImage()
     }
 
@@ -1324,6 +1332,10 @@ class ChatHomeScreenshotTest {
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
     fun typedProfileRoundTripKeepsNormalDock() {
         composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("a")
+        composeRule.onNodeWithText("a").performTextClearance()
+        composeRule.waitForIdle()
+        val before = dockSnapshot()
         composeRule.onNodeWithText("write what you want to do").performTextInput("focus Focus")
         composeRule.onNodeWithText("Send").performClick()
         composeRule.waitForIdle()
@@ -1336,6 +1348,7 @@ class ChatHomeScreenshotTest {
         }
         composeRule.onNodeWithText("Maps").assertExists()
         composeRule.onNodeWithText("Chrome").assertExists()
+        org.junit.Assert.assertEquals("Normal dock must be exactly as before the Focus round trip", before, dockSnapshot())
         composeRule.onRoot().captureRoboImage()
     }
 
@@ -1346,7 +1359,8 @@ class ChatHomeScreenshotTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("write what you want to do").performTextInput("ch")
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Chrome").assertExists()
+        // Chrome appears twice: the dock note and the suggestion chip.
+        org.junit.Assert.assertTrue(composeRule.onAllNodesWithText("Chrome").fetchSemanticsNodes().size >= 2)
         composeRule.onNodeWithText("Chat with AI").assertExists()
         composeRule.onRoot().captureRoboImage()
     }
