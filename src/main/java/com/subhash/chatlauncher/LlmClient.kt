@@ -73,7 +73,11 @@ object LlmClient {
             else -> null
         }
 
-    private const val SYSTEM_PROMPT = "You are the voice of a chat-first Android launcher. Be brief and plain. You cannot perform device actions yourself; the launcher app handles app launches and message drafts. When visual formatting genuinely helps, you may answer in simple HTML (no scripts)."
+    // Owner Nov 7 00:56: crisper prompt - short output contract up front, Markdown (the app
+    // renders Markdown now), never HTML (the old HTML bubble caused the size-flip bug), and the
+    // unchanged capability boundary: no device actions, free-only models are enforced at the
+    // request layer, not here.
+    private const val SYSTEM_PROMPT = "You are the assistant in a chat-first Android launcher. Reply in one or two short sentences unless asked for more. Use simple Markdown (bold, lists, code); never HTML. You cannot perform device actions - the launcher handles app launches and message drafts."
 
     /**
      * Chat with progressive delivery: onDelta receives each text chunk as it arrives (OpenRouter
