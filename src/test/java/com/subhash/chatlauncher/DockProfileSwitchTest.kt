@@ -11,7 +11,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import org.junit.Assert.assertEquals
-import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
