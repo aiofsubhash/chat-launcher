@@ -22,11 +22,11 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.remember
 import androidx.compose.foundation.background
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -58,6 +58,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -641,7 +642,9 @@ fun ChatHome(
                 false,
                 finalText,
                 fromCloud = reply != null,
-                isHtml = reply?.contains(Regex("<[a-z]+[ >]")) == true,
+                // Real HTML blocks only: code with generics/comparisons stays plain text
+                // instead of flipping into the WebView mid-conversation (device Nov 7 00:30).
+                isHtml = reply?.let(::looksLikeHtml) == true,
             )
             history?.append("assistant", if (reply != null) "cloud" else "local", finalText)
         }
@@ -689,6 +692,11 @@ fun ChatHome(
         if (raw.isEmpty()) return
         lastActivityAt = System.currentTimeMillis()
         input = ""
+        // Owner Nov 7 00:56: "once I hit send get the keyboard down" - tapping Send always
+        // drops the IME and focus, whatever the message routes to. Return still inserts a
+        // newline; only the Send button submits.
+        keyboardController?.hide()
+        focusManager.clearFocus()
         // A pending "what should I say?" question: this line is the draft body.
         val pending = pendingDraft
         if (pending != null) {
@@ -923,7 +931,9 @@ fun ChatHome(
                         } else if (msg.isHtml) {
                             HtmlBubble(msg.text)
                         } else {
-                            Text(msg.text, fontFamily = roundedFont, modifier = Modifier.padding(vertical = 6.dp))
+                            // One renderer for streaming and settled text (same size): Markdown
+                            // shown as formatting, never raw ** or ### (device Nov 7 00:30).
+                            MarkdownText(msg.text, fontFamily = roundedFont, modifier = Modifier.padding(vertical = 6.dp))
                         }
                         if (!msg.fromUser && msg.fromCloud) {
                             Text("cloud ai", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f), fontFamily = roundedFont)
@@ -985,15 +995,17 @@ fun ChatHome(
                     onValueChange = { input = it },
                     // Extremely tight usable height (small viewport + IME inset): compact
                     // composer so the chips row and Send stay visible (main 01:33 IME gate).
-                    modifier = Modifier.fillMaxWidth().heightIn(min = if (veryTightHeight) 48.dp else 88.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = if (veryTightHeight) 48.dp else 88.dp, max = 168.dp),
                     textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp, fontFamily = roundedFont),
                     // Owner 23:10: no blinking caret in Focus mode; Normal mode keeps it.
                     cursorBrush = androidx.compose.ui.graphics.SolidColor(
                         if (activeProfile == CommandRouter.FOCUS) androidx.compose.ui.graphics.Color.Transparent
                         else MaterialTheme.colorScheme.onSurface
                     ),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { send() }),
+                    // Owner Nov 7 00:30: the keyboard needs a real newline - multi-line input
+                    // with the default IME action (return inserts a line break). Sending
+                    // stays on the brown Send button only.
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
                     decorationBox = { inner ->
                         Box {
                             if (input.isEmpty()) Text("write what you want to do", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f), fontSize = 15.sp, fontFamily = roundedFont)
@@ -1681,20 +1693,63 @@ fun SettingsContent(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     } else {
-                        historyEntries.take(50).forEach { e ->
-                            Column(modifier = Modifier.padding(vertical = 7.dp)) {
+                        // Owner Nov 7 00:31: progressive disclosure - collapsed shows ONLY his
+                        // query; tap the query to expand the full exchange, tap again to collapse.
+                        val turns = remember(historyEntries) { groupHistoryTurns(historyEntries.take(150)) }
+                        var expandedTurn by rememberSaveable { mutableStateOf(-1L) }
+                        turns.take(30).forEach { turn ->
+                            val expanded = expandedTurn == turn.id
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { expandedTurn = if (expanded) -1L else turn.id }
+                                    .padding(vertical = 7.dp),
+                            ) {
+                                val query = turn.query
                                 Text(
-                                    "${SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()).format(Date(e.ts))} · ${if (e.role == "user") "You" else "Instinct"}${if (e.source == "cloud") " · cloud ai" else ""}",
+                                    "${SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()).format(Date(turn.id))} · ${if (query != null) "You" else "Instinct"}",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
-                                Text(
-                                    e.text,
-                                    fontFamily = roundedFont,
-                                    fontSize = 15.sp,
-                                    color = MaterialTheme.colorScheme.onBackground,
-                                    modifier = Modifier.padding(top = 2.dp),
-                                )
+                                if (query != null) {
+                                    Text(
+                                        query.text,
+                                        fontFamily = roundedFont,
+                                        fontSize = 15.sp,
+                                        color = MaterialTheme.colorScheme.onBackground,
+                                        maxLines = if (expanded) Int.MAX_VALUE else 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(top = 2.dp),
+                                    )
+                                }
+                                if (expanded) {
+                                    turn.responses.forEach { r ->
+                                        Text(
+                                            "Instinct${if (r.source == "cloud") " · cloud ai" else ""}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(top = 8.dp),
+                                        )
+                                        MarkdownText(
+                                            r.text,
+                                            fontFamily = roundedFont,
+                                            fontSize = 15.sp,
+                                            color = MaterialTheme.colorScheme.onBackground,
+                                            modifier = Modifier.padding(top = 2.dp),
+                                        )
+                                    }
+                                } else if (query == null && turn.responses.isNotEmpty()) {
+                                    Text(
+                                        turn.responses.first().text,
+                                        fontFamily = roundedFont,
+                                        fontSize = 15.sp,
+                                        color = MaterialTheme.colorScheme.onBackground,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(top = 2.dp),
+                                    )
+                                }
                             }
                         }
                     }
