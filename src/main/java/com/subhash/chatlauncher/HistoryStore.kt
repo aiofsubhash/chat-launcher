@@ -44,3 +44,42 @@ class HistoryStore(
 
     fun clear() = prefs.edit().remove(key).apply()
 }
+
+
+/** One collapsed row in History: the user's query plus the replies it produced. */
+data class HistoryTurn(
+    /** Timestamp of the turn's first entry - stable id for expand/collapse state. */
+    val id: Long,
+    val query: HistoryEntry?,
+    val responses: List<HistoryEntry>,
+)
+
+/**
+ * Groups a newest-first entry list into newest-first turns. A user line starts a turn;
+ * following assistant lines are its responses. Assistant-only runs (launch notes, status)
+ * become query-less turns so nothing disappears from History.
+ */
+fun groupHistoryTurns(entriesNewestFirst: List<HistoryEntry>): List<HistoryTurn> {
+    val turns = ArrayList<HistoryTurn>()
+    var query: HistoryEntry? = null
+    var responses = ArrayList<HistoryEntry>()
+    var turnStart = 0L
+    fun flush() {
+        if (query != null || responses.isNotEmpty()) turns.add(HistoryTurn(turnStart, query, responses.toList()))
+        query = null
+        responses = ArrayList()
+        turnStart = 0L
+    }
+    for (e in entriesNewestFirst.asReversed()) {
+        if (e.role == "user") {
+            flush()
+            query = e
+            turnStart = e.ts
+        } else {
+            if (query == null && responses.isEmpty()) turnStart = e.ts
+            responses.add(e)
+        }
+    }
+    flush()
+    return turns.asReversed()
+}
