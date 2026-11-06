@@ -41,7 +41,6 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.printToLog
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.test.performTextClearance
-import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
@@ -465,7 +464,7 @@ class ChatHomeScreenshotTest {
     fun draftChannelQuestion() {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("write what you want to do").performTextInput("send this message to Avinash: hello, running late")
-        composeRule.onNodeWithText("send this message to Avinash: hello, running late").performImeAction()
+        composeRule.onNodeWithText("Send").performClick() // Nov 7: keyboard return is a newline now; Send button submits
         composeRule.waitForIdle()
         composeRule.onRoot().captureRoboImage()
     }
@@ -579,8 +578,8 @@ class ChatHomeScreenshotTest {
         composeRule.onNodeWithText("write what you want to do").performTextInput("insta")
         composeRule.waitForIdle()
         composeRule.onNodeWithText("Instagram").assertExists()
-        // ...and Enter dispatches the launch.
-        composeRule.onNodeWithText("insta").performImeAction()
+        // ...and the Send button dispatches the launch (keyboard return is a newline, owner Nov 7).
+        composeRule.onNodeWithText("Send").performClick() // Nov 7: keyboard return is a newline now; Send button submits
         composeRule.waitForIdle()
         val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
         org.junit.Assert.assertNotNull("Work mode still launches an allowed non-pin app", started)
@@ -626,7 +625,7 @@ class ChatHomeScreenshotTest {
     fun instaEnterDispatchesLaunch() {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("write what you want to do").performTextInput("Insta")
-        composeRule.onNodeWithText("Insta").performImeAction()
+        composeRule.onNodeWithText("Send").performClick() // Nov 7: keyboard return is a newline now; Send button submits
         composeRule.waitForIdle()
         val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
         org.junit.Assert.assertNotNull("an open request was dispatched", started)
@@ -793,7 +792,7 @@ class ChatHomeScreenshotTest {
     fun settingsTypedOpensSettingsApp() {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("write what you want to do").performTextInput("settings")
-        composeRule.onNodeWithText("settings").performImeAction()
+        composeRule.onNodeWithText("Send").performClick() // Nov 7: keyboard return is a newline now; Send button submits
         composeRule.waitForIdle()
         val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
         org.junit.Assert.assertNotNull("typed 'settings' dispatches the launch", started)
@@ -807,7 +806,7 @@ class ChatHomeScreenshotTest {
     fun whatsappTypedEnterLaunchesApp() {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("write what you want to do").performTextInput("whatsapp")
-        composeRule.onNodeWithText("whatsapp").performImeAction()
+        composeRule.onNodeWithText("Send").performClick() // Nov 7: keyboard return is a newline now; Send button submits
         composeRule.waitForIdle()
         val started = Shadows.shadowOf(composeRule.activity).nextStartedActivity
         org.junit.Assert.assertNotNull("typed 'whatsapp' dispatches the launch", started)
@@ -821,7 +820,7 @@ class ChatHomeScreenshotTest {
     fun unpairedOpenTextGetsConnectionGuidance() {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("write what you want to do").performTextInput("what's up")
-        composeRule.onNodeWithText("what's up").performImeAction()
+        composeRule.onNodeWithText("Send").performClick() // Nov 7: keyboard return is a newline now; Send button submits
         composeRule.waitForIdle()
         composeRule.onNodeWithText("AI isn't connected yet - this build sets itself up when you open it online, or see Settings > Account. Nothing was sent.").assertExists()
         composeRule.onNodeWithText("Noted - that's saved in history on this phone.", substring = true).assertDoesNotExist()
@@ -849,7 +848,7 @@ class ChatHomeScreenshotTest {
     fun explicitNoteSavesLocally() {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("write what you want to do").performTextInput("note buy milk")
-        composeRule.onNodeWithText("note buy milk").performImeAction()
+        composeRule.onNodeWithText("Send").performClick() // Nov 7: keyboard return is a newline now; Send button submits
         composeRule.waitForIdle()
         composeRule.onNodeWithText("Noted - saved on this phone: buy milk").assertExists()
     }
@@ -1398,5 +1397,57 @@ class ChatHomeScreenshotTest {
         composeRule.onNodeWithText("Timer").assertExists()
         composeRule.onRoot().captureRoboImage()
         p.edit().remove("dock_apps").commit()
+    }
+    /** Device Nov 7 00:30 reply, rendered in the REAL chat screen on the paper background
+     *  (light): mid-stream and settled. One renderer, one size, markdown as formatting. */
+    private val videoReply = "To find the implicit state machines in your application, you need to look for places where **logic depends on the history of previous events** or where **the system's behavior changes based on its current \"mode.\"**\n\nAn implicit state machine exists whenever a piece of code says: *\"If X happened, and we are currently in state Y, then do Z.\"*\n\n---\n\n### 1. Search for \"Boolean Combinations\"\nThe most common type:\n```\nif (isLoading && !isError && dataLoaded) { ... }\n```\n* **The Pattern:** flags used in `if` statements."
+
+    private fun replyChatHome(dark: Boolean, streamGate: kotlinx.coroutines.CompletableDeferred<Unit>?) {
+        val prefs = composeRule.activity.getSharedPreferences("chat_launcher", android.content.Context.MODE_PRIVATE)
+        composeRule.activity.setContent {
+            MaterialTheme(colorScheme = if (dark) darkCalmColors else calmColors) {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    ChatHome(
+                        router = CommandRouter(composeRule.activity, prefs),
+                        resolveApps = { emptyList() },
+                        shareTargets = { emptyList() },
+                        allApps = { emptyList() },
+                        sendToLlm = { _, onDelta ->
+                            val mid = videoReply.length / 2
+                            onDelta(videoReply.substring(0, mid))
+                            streamGate?.await()
+                            onDelta(videoReply.substring(mid))
+                            videoReply
+                        },
+                        launchApp = { true },
+                        aiAvailable = { true },
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun replyMarkdownLightStreamingAndSettled() {
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        replyChatHome(dark = false, streamGate = gate)
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("implicit state machines?")
+        composeRule.onNodeWithText("Send").performClick()
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage("build/outputs/roborazzi/reply_streaming_light.png")
+        gate.complete(Unit)
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage("build/outputs/roborazzi/reply_settled_light.png")
+    }
+
+    @Test
+    fun replyMarkdownDarkSettled() {
+        replyChatHome(dark = true, streamGate = null)
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("implicit state machines?")
+        composeRule.onNodeWithText("Send").performClick()
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage("build/outputs/roborazzi/reply_settled_dark.png")
     }
 }
