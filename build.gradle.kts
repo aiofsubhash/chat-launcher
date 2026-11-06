@@ -13,8 +13,8 @@ android {
         applicationId = "com.subhash.chatlauncher"
         minSdk = 26
         targetSdk = 34
-        versionCode = 7
-        versionName = "0.5.2"
+        versionCode = 8
+        versionName = "0.5.3"
 
         // Automatic AI enrollment (owner 14:43): the ticket is injected at build time from a
         // vault-materialized file PATH (-PenrollmentTicketFile=...) - never source, repo, logs,
