@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -1138,6 +1139,9 @@ fun ChatHome(
             onThemeMode = onThemeMode,
             historyEntries = { history?.all() ?: emptyList() },
             contextEntries = userContext.entries(),
+            // Activity-monitor level only (owner Nov 7): per-app foreground time, read
+            // on demand, never stored by us or sent anywhere.
+            usageSource = remember { AndroidUsageSource(context) { allApps().filter { !it.isWork }.associate { it.packageName to it.label } } },
             onClose = { showSettings = false },
         )
     }
@@ -1254,6 +1258,7 @@ fun SettingsDialog(
     onThemeMode: (String) -> Unit = {},
     historyEntries: () -> List<HistoryEntry> = { emptyList() },
     contextEntries: List<UserContextStore.Entry> = emptyList(),
+    usageSource: UsageSource? = null,
     onClose: () -> Unit,
 ) {
     var key by remember { mutableStateOf(router.apiKey) }
@@ -1301,6 +1306,7 @@ fun SettingsDialog(
         apps = apps,
         historyEntries = historyEntries(),
         contextEntries = contextEntries,
+        usageSource = usageSource,
         onCancel = onClose,
         onSave = {
             fun applyAll() {
@@ -1369,6 +1375,7 @@ fun SettingsPage(
     apps: List<AppEntry>,
     historyEntries: List<HistoryEntry> = emptyList(),
     contextEntries: List<UserContextStore.Entry> = emptyList(),
+    usageSource: UsageSource? = null,
     onCancel: () -> Unit,
     onSave: () -> Unit,
     switcherInitiallyOpen: Boolean = false,
@@ -1416,6 +1423,7 @@ fun SettingsPage(
                     apps = apps,
                     historyEntries = historyEntries,
                     contextEntries = contextEntries,
+                    usageSource = usageSource,
                     editingProfile = editingProfile, onEditProfile = onEditProfile,
                     switcherInitiallyOpen = switcherInitiallyOpen,
                     pickerInitiallyOpen = pickerInitiallyOpen,
@@ -1488,6 +1496,7 @@ fun SettingsContent(
     apps: List<AppEntry>,
     historyEntries: List<HistoryEntry> = emptyList(),
     contextEntries: List<UserContextStore.Entry> = emptyList(),
+    usageSource: UsageSource? = null,
     switcherInitiallyOpen: Boolean = false,
     pickerInitiallyOpen: Boolean = false,
     editorInitiallyOpen: Boolean = false,
@@ -1508,12 +1517,13 @@ fun SettingsContent(
             roundedFont = roundedFont,
             initiallyOpen = switcherInitiallyOpen,
         )
-        Row(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+        Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 12.dp)) {
             // Equal-weight, single-line tabs: "Account" must never wrap or clip, even at 320dp.
-            listOf("home" to "Home", "history" to "History", "context" to "Context", "account" to "Account").forEachIndexed { i, (id, label) ->
-                if (i > 0) Spacer(Modifier.width(6.dp))
+            // Scroll at narrow widths rather than shrink or truncate tab labels.
+            listOf("home" to "Home", "usage" to "Usage", "history" to "History", "context" to "Context", "account" to "Account").forEachIndexed { i, (id, label) ->
+                if (i > 0) Spacer(Modifier.width(4.dp))
                 OptionText(label, selected = tab == id, onClick = { tab = id }, font = roundedFont, fontSize = 14.sp,
-                    modifier = Modifier.weight(1f), textAlign = TextAlign.Center, horizontalPadding = 4.dp)
+                    textAlign = TextAlign.Center, horizontalPadding = 10.dp)
             }
         }
         WobblyDivider()
@@ -1682,6 +1692,104 @@ fun SettingsContent(
                         }
                     } else {
                         OptionText("+ New profile", selected = false, onClick = { editorOpen = true }, font = roundedFont, fontSize = 15.sp)
+                    }
+                }
+                "usage" -> item {
+                    Text("App usage", style = MaterialTheme.typography.titleMedium, fontFamily = roundedFont, modifier = Modifier.padding(bottom = 10.dp))
+                    Text(
+                        "Foreground time today in this Android profile. Read on this phone, never uploaded. Work-profile usage is separate.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    val source = usageSource
+                    if (source == null) {
+                        Text(
+                            "This build can't read app usage.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 12.dp),
+                        )
+                    } else {
+                        var hasAccess by remember { mutableStateOf(source.hasAccess()) }
+                        var today by remember { mutableStateOf(emptyList<AppUsage>()) }
+                        var usageError by remember { mutableStateOf<String?>(null) }
+                        // Re-read whenever the screen resumes: returning from the system
+                        // usage-access toggle (or tomorrow's midnight) shows fresh numbers.
+                        androidx.lifecycle.compose.LifecycleResumeEffect(Unit) {
+                            hasAccess = source.hasAccess()
+                            usageError = null
+                            today = try { if (hasAccess) source.today() else emptyList() }
+                            catch (e: Exception) { usageError = "Couldn't read usage. Unlock your phone and reopen this tab to try again."; emptyList() }
+                            onPauseOrDispose { }
+                        }
+                        if (!hasAccess) {
+                            Text(
+                                "Android already counts this, but the launcher can't read it until you allow it once.",
+                                fontFamily = roundedFont,
+                                fontSize = 15.sp,
+                                color = MaterialTheme.colorScheme.onBackground,
+                                modifier = Modifier.padding(top = 14.dp),
+                            )
+                            OptionText(
+                                "Open usage access settings",
+                                selected = false,
+                                onClick = {
+                                    try {
+                                        settingsContext.startActivity(Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                                    } catch (e: Exception) { }
+                                },
+                                font = roundedFont,
+                                fontSize = 15.sp,
+                                modifier = Modifier.padding(top = 4.dp).testTag("usage_access_button"),
+                            )
+                            Text(
+                                "In the screen that opens, tap Chat Launcher and allow usage access. When you come back, your apps show up here.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 6.dp),
+                            )
+                        } else if (usageError != null) {
+                            Text(usageError!!, fontFamily = roundedFont, fontSize = 15.sp,
+                                color = MaterialTheme.colorScheme.onBackground,
+                                modifier = Modifier.padding(top = 14.dp))
+                        } else if (today.isEmpty()) {
+                            Text(
+                                "Nothing counted yet today.",
+                                fontFamily = roundedFont,
+                                fontSize = 15.sp,
+                                color = MaterialTheme.colorScheme.onBackground,
+                                modifier = Modifier.padding(top = 14.dp),
+                            )
+                        } else {
+                            Text(
+                                "Today so far - ${UsageStatsLogic.formatDuration(today.sumOf { it.foregroundMillis })} across ${today.size} apps",
+                                fontFamily = roundedFont,
+                                fontSize = 15.sp,
+                                color = MaterialTheme.colorScheme.onBackground,
+                                modifier = Modifier.padding(top = 14.dp, bottom = 6.dp),
+                            )
+                            today.forEach { u ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(u.label, fontFamily = roundedFont, fontSize = 16.sp, color = MaterialTheme.colorScheme.onBackground)
+                                        Text(
+                                            "last ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(u.lastUsedMillis))}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    Text(
+                                        UsageStatsLogic.formatDuration(u.foregroundMillis),
+                                        fontFamily = roundedFont,
+                                        fontSize = 16.sp,
+                                        color = MaterialTheme.colorScheme.onBackground,
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
                 "history" -> item {
