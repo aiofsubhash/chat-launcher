@@ -3,7 +3,7 @@
 An Android home-screen launcher where the home screen is a chat, built for and with
 Subhash (first user). Private repo under aiofsubhash; subhash-kashyap is collaborator.
 
-Current release: v0.5.4 (versionCode 9), developed on branch `wip-device-feedback`.
+Current release: v0.5.5 (versionCode 10), developed on branch `wip-device-feedback`.
 
 ## Read first
 
