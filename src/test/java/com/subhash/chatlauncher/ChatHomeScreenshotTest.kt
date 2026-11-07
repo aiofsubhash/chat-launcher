@@ -341,7 +341,7 @@ class ChatHomeScreenshotTest {
         composeRule.onRoot().captureRoboImage()
     }
 
-    private fun settingsPageContent(switcherOpen: Boolean = false, section: String? = null, pickerOpen: Boolean = false, editing: String? = null, editorOpen: Boolean = false, dark: Boolean = false, advancedOpen: Boolean = false, historyEntries: List<HistoryEntry> = emptyList()) {
+    private fun settingsPageContent(switcherOpen: Boolean = false, section: String? = null, pickerOpen: Boolean = false, editing: String? = null, editorOpen: Boolean = false, dark: Boolean = false, advancedOpen: Boolean = false, historyEntries: List<HistoryEntry> = emptyList(), usageSource: UsageSource? = null) {
         val apps = listOf(
             AppEntry("WhatsApp", "com.whatsapp", Intent()),
             AppEntry("Chrome", "com.android.chrome", Intent()),
@@ -367,6 +367,7 @@ class ChatHomeScreenshotTest {
                     activeProfile = "Focus",
                     apps = apps,
                     historyEntries = historyEntries,
+                    usageSource = usageSource,
                     onCancel = {}, onSave = {},
                     switcherInitiallyOpen = switcherOpen,
                     pickerInitiallyOpen = pickerOpen,
@@ -425,6 +426,50 @@ class ChatHomeScreenshotTest {
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
     fun settingsPageAccountAdvanced() {
         settingsPageContent(section = "account", advancedOpen = true)
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    private class FakeUsageSource(
+        private val access: Boolean,
+        private val rows: List<AppUsage> = emptyList(),
+    ) : UsageSource {
+        override fun hasAccess(): Boolean = access
+        override fun today(): List<AppUsage> = rows
+    }
+
+    /** Usage tab with today's per-app times once usage access is on. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsPageUsage() {
+        val rows = listOf(
+            AppUsage("com.whatsapp", "WhatsApp", 95 * 60_000L, 1762505100000L),
+            AppUsage("com.instagram.android", "Instagram", 42 * 60_000L, 1762504200000L),
+            AppUsage("com.android.chrome", "Chrome", 18 * 60_000L, 1762502400000L),
+        )
+        settingsPageContent(section = "usage", usageSource = FakeUsageSource(true, rows))
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Usage tab before the one-time usage-access grant: explanation plus the deep-link button. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsPageUsageNoAccess() {
+        settingsPageContent(section = "usage", usageSource = FakeUsageSource(false))
+        composeRule.waitForIdle()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Usage tab in the dark palette. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun settingsPageUsageDark() {
+        val rows = listOf(
+            AppUsage("com.whatsapp", "WhatsApp", 95 * 60_000L, 1762505100000L),
+            AppUsage("com.instagram.android", "Instagram", 42 * 60_000L, 1762504200000L),
+        )
+        settingsPageContent(section = "usage", dark = true, usageSource = FakeUsageSource(true, rows))
         composeRule.waitForIdle()
         composeRule.onRoot().captureRoboImage()
     }
@@ -1189,7 +1234,8 @@ class ChatHomeScreenshotTest {
         composeRule.waitForIdle()
         val root = composeRule.onRoot().getUnclippedBoundsInRoot()
         var lineHeight = -1f
-        for (label in listOf("Home", "History", "Context", "Account")) {
+        for (label in listOf("Home", "Usage", "History", "Context", "Account")) {
+            composeRule.onNodeWithText(label).performScrollTo()
             val b = composeRule.onNodeWithText(label).getUnclippedBoundsInRoot()
             org.junit.Assert.assertTrue("$label clipped offscreen: $b vs $root", b.right <= root.right && b.left >= root.left)
             val h = (b.bottom - b.top).value
