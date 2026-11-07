@@ -2,6 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Usage tab (owner Nov 7: "activity monitor level is enough"): read today's per-app
+         foreground time from Android's own counts. Special access - the user turns it on
+         once in system settings; the app cannot grant it to itself. On-device only. -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
     <!-- Focus profile's Timer note opens the clock app's timer UI -->
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
 
