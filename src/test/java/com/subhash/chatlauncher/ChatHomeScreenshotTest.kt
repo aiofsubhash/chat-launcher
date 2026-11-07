@@ -1047,6 +1047,20 @@ class ChatHomeScreenshotTest {
         composeRule.onNodeWithText("Maps").assertIsDisplayed()
     }
 
+    /** Device Nov 7 15:35: typing long multi-line text squashed the chips row and Send into
+     *  strokes. With the keyboard-height proxy the controls must stay visible and usable. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h420dp-xxhdpi")
+    fun composerMultilineKeepsControlsUsable() {
+        composeRule.onNodeWithText("write what you want to do").performTextInput("d\nd\nd\nd\nd\nd\nd\nd")
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Send").assertIsDisplayed()
+        val sendBottom = composeRule.onNodeWithText("Send").fetchSemanticsNode().boundsInRoot.bottom
+        val rootBottom = composeRule.onRoot().fetchSemanticsNode().boundsInRoot.bottom
+        org.junit.Assert.assertTrue("Send must sit fully above the bottom edge", sendBottom <= rootBottom)
+        composeRule.onRoot().captureRoboImage()
+    }
+
     /** Same dock-on-arrival guarantee at small available height (IME-open proxy). */
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h420dp-xxhdpi")
@@ -1397,30 +1411,82 @@ class ChatHomeScreenshotTest {
         composeRule.onRoot().captureRoboImage()
     }
 
-    /** Owner Nov 3 23:05: typed text with app matches shows "Chat with AI" as the last option. */
+    /** Owner Nov 7 15:34: "Chat with AI" is NOT a typing suggestion; it lives only in the
+     *  post-Send chooser when several apps match. App chips still appear while typing. */
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
-    fun chatWithAiIsLastSuggestion() {
+    fun chatWithAiNotShownWhileTyping() {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("write what you want to do").performTextInput("ch")
         composeRule.waitForIdle()
         // Chrome appears twice: the dock note and the suggestion chip.
         org.junit.Assert.assertTrue(composeRule.onAllNodesWithText("Chrome").fetchSemanticsNodes().size >= 2)
-        composeRule.onNodeWithText("Chat with AI").assertExists()
+        composeRule.onNodeWithText("Chat with AI").assertDoesNotExist()
         composeRule.onRoot().captureRoboImage()
     }
 
-    /** No app match at all still offers Chat with AI; unpaired tap explains instead of sending. */
+    /** Owner Nov 7 15:33: typing a name with spaces still matches the app chip - extra and
+     *  intra-brand whitespace ("ch rome", trailing space) must not break the clickable match. */
     @Test
     @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
-    fun chatWithAiOfferedWithNoAppMatchUnpaired() {
+    fun spaceInTypedAppNameStillSuggests() {
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("ch rome")
+        composeRule.waitForIdle()
+        org.junit.Assert.assertTrue(composeRule.onAllNodesWithText("Chrome").fetchSemanticsNodes().size >= 2)
+        composeRule.onNodeWithText("Chat with AI").assertDoesNotExist()
+        composeRule.onRoot().captureRoboImage()
+    }
+
+    /** No app match at all: Send takes the message to the AI path; unpaired explains instead. */
+    @Test
+    @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
+    fun sendWithNoAppMatchUnpairedExplains() {
         composeRule.waitForIdle()
         composeRule.onNodeWithText("write what you want to do").performTextInput("zzqx")
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Chat with AI").performClick()
+        composeRule.onNodeWithText("Chat with AI").assertDoesNotExist()
+        composeRule.onNodeWithText("Send").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithText("AI isn't connected yet - this build sets itself up when you open it online, or see Settings > Account. Nothing was sent.").assertExists()
         composeRule.onRoot().captureRoboImage()
+    }
+
+    /** Owner Nov 7 15:34: Send with several app matches shows the chooser with the matching
+     *  apps plus "Chat with AI" as the last option. Rendered through the real chat screen. */
+    @Test
+    fun sendWithMultipleMatchesShowsChooserWithChatWithAi() {
+        val prefs = composeRule.activity.getSharedPreferences("chat_launcher", android.content.Context.MODE_PRIVATE)
+        val two = listOf(
+            AppEntry("InstaOne", "com.example.instaone", android.content.Intent()),
+            AppEntry("InstaTwo", "com.example.instatwo", android.content.Intent()),
+        )
+        composeRule.activity.setContent {
+            MaterialTheme(colorScheme = calmColors) {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    ChatHome(
+                        router = CommandRouter(composeRule.activity, prefs),
+                        resolveApps = { q -> two.filter { appNameMatches(it.label, it.packageName, q) } },
+                        shareTargets = { emptyList() },
+                        allApps = { two },
+                        sendToLlm = { prompt, _ -> "echo: $prompt" },
+                        launchApp = { true },
+                        aiAvailable = { true },
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("write what you want to do").performTextInput("insta")
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Chat with AI").assertDoesNotExist()
+        composeRule.onNodeWithText("Send").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("I see more than one 'insta' here - which one?").assertExists()
+        composeRule.onNodeWithText("InstaOne").assertExists()
+        composeRule.onNodeWithText("InstaTwo").assertExists()
+        composeRule.onNodeWithText("Chat with AI").assertExists()
+        composeRule.onRoot().captureRoboImage("build/outputs/roborazzi/chooser_multi_apps_chat_with_ai.png")
     }
 
     /** Settings Save must preserve a Timer note chosen for the Normal dock (it is not in the installed-app list). */
