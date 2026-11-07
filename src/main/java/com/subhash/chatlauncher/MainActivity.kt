@@ -195,6 +195,16 @@ const val CHAT_WITH_AI_KEY = "special:chat_with_ai"
 /** Caption under cloud replies: "ai-ing" while a reply streams, plain "ai" once settled (owner Nov 7). */
 fun cloudCaption(streaming: Boolean): String = if (streaming) "ai-ing" else "ai"
 
+/** App suggestion match (owner Nov 7): typing a name with spaces must still match - extra or
+ *  trailing whitespace is ignored, and brand words split with spaces ("whats app") still hit. */
+fun appNameMatches(label: String, packageName: String, query: String): Boolean {
+    val q = query.trim().replace(Regex("\\s+"), " ")
+    if (q.isEmpty()) return true
+    if (label.contains(q, ignoreCase = true) || packageName.contains(q, ignoreCase = true)) return true
+    val qSquash = q.replace(" ", "")
+    return label.replace(" ", "").contains(qSquash, ignoreCase = true)
+}
+
 data class AppEntry(
     val label: String,
     val packageName: String,
@@ -454,12 +464,13 @@ class MainActivity : ComponentActivity() {
 
     private fun resolveApps(query: String, limit: Int = 6): List<AppEntry> {
         val allowed = currentAllowed()
+        val q = query.trim().replace(Regex("\\s+"), " ")
         return installedApps()
             .asSequence()
             .filter { allowed == null || it.identityKey in allowed }
-            .filter { query.isBlank() || it.label.contains(query, true) || it.packageName.contains(query, true) }
+            .filter { q.isBlank() || appNameMatches(it.label, it.packageName, q) }
             .sortedBy {
-                val i = it.label.indexOf(query, ignoreCase = true)
+                val i = it.label.indexOf(q, ignoreCase = true)
                 if (i < 0) Int.MAX_VALUE else i
             }
             .toList()
@@ -753,7 +764,7 @@ fun ChatHome(
         }
         if (result is CommandRouter.Result.Reply && result.text.isEmpty()) {
             // General conversation goes straight to the AI when connected (owner 22:52) - only
-            // this one message leaves the phone. Unpaired keeps the explicit per-message chip.
+            // this one message leaves the phone. Unpaired explains the connection path instead.
             // Typing the exact name of an installed app that the active profile does not allow is a
             // local policy answer, never an AI question (device 23:36: "Instagram" under Work -> 502).
             val blockedExact = activeProfile != null && allApps().any { app ->
@@ -846,9 +857,10 @@ fun ChatHome(
     val imeBottomDp = with(homeDensity) { WindowInsets.ime.getBottom(this).toDp().value }
     val availableHeightDp = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp - imeBottomDp
     val tightHeight = availableHeightDp < 560
-    // Extremely tight (small viewport with keyboard open): the date yields so the dock,
+    // Tight (keyboard open on a phone viewport, device Nov 7 15:35: multi-line text squashed
+    // the chips row and Send into strokes): the date and the big dock gap yield so the dock,
     // composer and Send stay reachable.
-    val veryTightHeight = availableHeightDp < 400
+    val veryTightHeight = availableHeightDp < 560
     // Critical (e.g. an already-resized window that still reports a large IME inset):
     // nothing fits pinned, so the whole home scrolls - every control stays reachable.
     val criticalHeight = availableHeightDp < 250
@@ -1001,7 +1013,7 @@ fun ChatHome(
                     onValueChange = { input = it },
                     // Extremely tight usable height (small viewport + IME inset): compact
                     // composer so the chips row and Send stay visible (main 01:33 IME gate).
-                    modifier = Modifier.fillMaxWidth().heightIn(min = if (veryTightHeight) 48.dp else 88.dp, max = 168.dp),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = if (veryTightHeight) 48.dp else 88.dp, max = if (veryTightHeight) 120.dp else 168.dp),
                     textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp, fontFamily = roundedFont),
                     // Owner 23:10: no blinking caret in Focus mode; Normal mode keeps it.
                     cursorBrush = androidx.compose.ui.graphics.SolidColor(
@@ -1022,7 +1034,9 @@ fun ChatHome(
                 // Query shortcuts (owner 22:53): long typed queries offer one-tap prefill into
                 // ChatGPT / Claude / Google through their documented URL contracts. Prefill
                 // only - the target app opens with the text filled in; the user sends it there.
-                Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                // Controls never squash (device Nov 7 15:35): the row keeps a usable height
+                // even when the multiline field above takes the rest of the space.
+                Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp).requiredHeightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
                     // Owner 21:52: brand-logo query shortcuts for longer queries ("more than
                     // four, five words" -> five-word threshold), plain transparent taps                     // next to Send, no bubbles (main 23:49). ChatGPT / Claude currently copy
                     // the query and open a blank chat (fallback pending user consent via main);
@@ -1049,8 +1063,8 @@ fun ChatHome(
                         }
                     }
                     // Suggestions sit inline left of Send, not above the composer.
-                    // Owner Nov 3 23:05: "Chat with AI" is always the LAST option once something is typed
-                    // (even with zero app matches); an explicit tap sends only this text to the AI.
+                    // Owner Nov 7 15:34: "Chat with AI" is NOT a typing suggestion - it appears
+                    // only in the post-Send chooser when several apps match the typed text.
                     if (input.isNotBlank()) {
                         LazyRow(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                             items(suggestions) { app ->
@@ -1072,25 +1086,6 @@ fun ChatHome(
                                         ),
                                 ) {
                                     Text(app.displayLabel, fontSize = 14.sp, modifier = Modifier.heightIn(min = 48.dp).wrapContentHeight().padding(horizontal = 12.dp))
-                                }
-                            }
-                            item {
-                                Surface(
-                                    shape = RoundedCornerShape(16.dp),
-                                    color = MaterialTheme.colorScheme.secondaryContainer,
-                                    modifier = Modifier
-                                        .padding(end = 8.dp)
-                                        .clickable {
-                                            val raw = input.trim()
-                                            if (raw.isNotEmpty()) {
-                                                lastActivityAt = System.currentTimeMillis()
-                                                input = ""
-                                                addUser(raw)
-                                                askAi(raw)
-                                            }
-                                        },
-                                ) {
-                                    Text("Chat with AI", fontSize = 14.sp, modifier = Modifier.heightIn(min = 48.dp).wrapContentHeight().padding(horizontal = 12.dp))
                                 }
                             }
                         }
