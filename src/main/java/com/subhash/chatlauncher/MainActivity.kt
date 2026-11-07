@@ -181,6 +181,8 @@ data class ChatMessage(
     val isHtml: Boolean = false,
     /** True when this reply came from the cloud AI (captioned, tagged in history). */
     val fromCloud: Boolean = false,
+    /** True while the reply is still streaming; the caption reads "ai-ing" until settled. */
+    val streaming: Boolean = false,
     val choiceApps: List<AppEntry> = emptyList(),
     val onChoice: ((AppEntry) -> Unit)? = null,
     /** When set, an explicit "Ask AI" action sends ONLY this prompt to the cloud. */
@@ -189,6 +191,9 @@ data class ChatMessage(
 
 /** Synthetic last choice in an app-match chooser: send the typed text to the AI instead. */
 const val CHAT_WITH_AI_KEY = "special:chat_with_ai"
+
+/** Caption under cloud replies: "ai-ing" while a reply streams, plain "ai" once settled (owner Nov 7). */
+fun cloudCaption(streaming: Boolean): String = if (streaming) "ai-ing" else "ai"
 
 data class AppEntry(
     val label: String,
@@ -632,11 +637,11 @@ fun ChatHome(
             return
         }
         scope.launch {
-            messages = messages + ChatMessage(false, "", fromCloud = true)
+            messages = messages + ChatMessage(false, "", fromCloud = true, streaming = true)
             var acc = ""
             val reply = sendToLlm(listOf("user" to prompt)) { delta ->
                 acc += delta
-                messages = messages.dropLast(1) + ChatMessage(false, acc, fromCloud = true)
+                messages = messages.dropLast(1) + ChatMessage(false, acc, fromCloud = true, streaming = true)
             }
             val finalText = reply ?: "Couldn't reach the AI - nothing was sent."
             messages = messages.dropLast(1) + ChatMessage(
@@ -937,7 +942,7 @@ fun ChatHome(
                             MarkdownText(msg.text, fontFamily = roundedFont, modifier = Modifier.padding(vertical = 6.dp))
                         }
                         if (!msg.fromUser && msg.fromCloud) {
-                            Text("cloud ai", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f), fontFamily = roundedFont)
+                            Text(cloudCaption(msg.streaming), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f), fontFamily = roundedFont)
                         }
                         if (!msg.fromUser && msg.askAi != null) {
                             Text(
@@ -1834,7 +1839,7 @@ fun SettingsContent(
                                 if (expanded) {
                                     turn.responses.forEach { r ->
                                         Text(
-                                            "Instinct${if (r.source == "cloud") " · cloud ai" else ""}",
+                                            "Instinct${if (r.source == "cloud") " · " + cloudCaption(false) else ""}",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.padding(top = 8.dp),
