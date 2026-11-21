@@ -1,0 +1,61 @@
+--- a/src/main/java/com/subhash/chatlauncher/MainActivity.kt
++++ b/src/main/java/com/subhash/chatlauncher/MainActivity.kt
+@@ -1061,23 +1061,31 @@
+     val energyStore = energyCheckInStore ?: remember { EnergyCheckInStore(energyCheckInPrefs(context)) }
+     val swipeCameraApp = allInstalled.firstOrNull { it.packageName.contains("camera") }
+ 
++    var oldLoopPending by remember { mutableStateOf<String?>(null) }
+     if (oldMode) {
+         val choice = messages.lastOrNull()?.takeIf { it.choiceApps.isNotEmpty() }
+         OldModeHome(
+             query = input,
+-            onQuery = { input = it; lastActivityAt = AppClock.nowMillis() },
++            onQuery = { input = it; oldLoopPending = null; lastActivityAt = AppClock.nowMillis() },
+             matches = if (input.isNotBlank()) visibleSuggestions else choice?.choiceApps ?: emptyList(),
+             latestReply = messages.lastOrNull { !it.fromUser }?.text,
+             onLaunch = { app ->
+                 keyboardController?.hide(); focusManager.clearFocus()
+                 if (choice != null && input.isBlank()) choice.onChoice?.invoke(app)
+                 else if (activeProfile == CommandRouter.REASONING && app.identityKey !in reasoningBypassed) reasoningIntervention = app
+-                else if (!maybeLoopIntercept(app)) {
+-                    if (!launchApp(app)) addAssistant(CommandRouter.launchFailureMessage(app))
+-                    input = ""
++                else {
++                    // Dismissing the loop card and tapping the same result is a deliberate
++                    // second tap. Do not trap Old mode in an endless reopen-card cycle.
++                    val deliberateSecondTap = oldLoopPending == app.identityKey
++                    oldLoopPending = null
++                    if (!deliberateSecondTap && maybeLoopIntercept(app)) oldLoopPending = app.identityKey
++                    else {
++                        if (!launchApp(app)) addAssistant(CommandRouter.launchFailureMessage(app))
++                        input = ""
++                    }
+                 }
+             },
+-            onSend = { send() },
++            onSend = { oldLoopPending = null; send() },
+             onSettings = { showSettings = true },
+             onNormal = {
+                 appearancePrefs.edit().putBoolean(OLD_MODE_KEY, false).apply()
+--- a/src/test/java/com/subhash/chatlauncher/LoopInterceptUiTest.kt
++++ b/src/test/java/com/subhash/chatlauncher/LoopInterceptUiTest.kt
+@@ -100,6 +100,19 @@
+         rule.onNodeWithTag("loop_card").assertDoesNotExist()
+     }
+ 
++    @Test fun oldModeDismissThenSecondTapLaunchesInsteadOfRepeatingCard() {
++        home(chain("test.insta" to 90_000L, "test.reddit" to 80_000L))
++        rule.runOnIdle { oldModePrefs(rule.activity).edit().putBoolean(OLD_MODE_KEY, true).commit() }
++        rule.waitForIdle()
++        repeat(3) { rule.onNodeWithTag("old_key_4").performClick() }
++        rule.onNodeWithText("1  Insta").performClick()
++        rule.onNodeWithTag("loop_card").assertExists()
++        assertTrue(launched.isEmpty())
++        rule.onNodeWithText("You're in a loop.").performClick()
++        rule.onNodeWithText("1  Insta").performClick()
++        assertEquals(listOf("test.insta"), launched)
++    }
++
+     // His exact sample shape: chain ... -> tap an app in it -> card first, no launch.
+     @Test fun firstTapShowsCardWithoutLaunching_secondTapLaunches() {
+         home(chain("test.insta" to 90_000L, "test.reddit" to 80_000L))
